@@ -1,0 +1,67 @@
+name: TypingStats
+options:
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  bundleIdPrefix: com.jinduoxia
+
+settings:
+  base:
+    # Manual signing with the local Apple Development cert → stable designated
+    # requirement, so the Accessibility (TCC) grant survives rebuilds. No
+    # provisioning profile needed for a local-only, non-distributed dev app.
+    DEVELOPMENT_TEAM: 4UGDKL43ZA
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development"
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "6.29.0"
+
+targets:
+  TypingStats:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/TypingStats
+      - path: Resources/AppIcon.icns
+    settings:
+      base:
+        PRODUCT_NAME: TypingStats
+        PRODUCT_BUNDLE_IDENTIFIER: com.jinduoxia.TypingStats
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/TypingStats.entitlements
+    dependencies:
+      - package: GRDB
+        product: GRDB
+
+  TypingStatsTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/TypingStatsTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jinduoxia.TypingStatsTests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: TypingStats
+
+schemes:
+  TypingStats:
+    build:
+      targets:
+        TypingStats: all
+        TypingStatsTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TypingStatsTests
