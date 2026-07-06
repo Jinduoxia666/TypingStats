@@ -15,7 +15,7 @@ struct SettingsView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("TypingStats 估算你每天输入的字数。", systemImage: "keyboard")
+            Label("TypingStats 记录你每天输入的字数。", systemImage: "keyboard")
                 .font(.headline)
 
             Stepper(value: $state.keystrokesPerCharacter, in: 1.0...6.0, step: 0.5) {

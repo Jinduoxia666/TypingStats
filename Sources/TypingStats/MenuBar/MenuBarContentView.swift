@@ -55,7 +55,7 @@ struct MenuBarContentView: View {
     private var header: some View {
         HStack {
             Image(systemName: "keyboard")
-            Text("今日字数(估算)").font(.headline)
+            Text("今日字数").font(.headline)
             Spacer()
         }
     }
@@ -69,11 +69,11 @@ struct MenuBarContentView: View {
                 Text("字").foregroundStyle(.secondary)
                 Spacer()
             }
-            Text("\(state.todayKeystrokesMerged) 次字母/数字按键 ÷ \(String(format: "%.1f", state.keystrokesPerCharacter))")
-                .font(.caption)
+            Text("本机 \(localChars) 字")
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
             if state.otherDevicesTodayKeystrokes > 0 {
-                Text("含其它设备 \(state.otherDevicesTodayKeystrokes) 次")
+                Text("含其他设备 \(otherDevicesChars) 字")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -82,6 +82,14 @@ struct MenuBarContentView: View {
 
     private var estimatedChars: Int {
         CharEstimate.characters(fromKeystrokes: state.todayKeystrokesMerged, factor: state.keystrokesPerCharacter)
+    }
+
+    private var localChars: Int {
+        CharEstimate.characters(fromKeystrokes: state.todayKeystrokes, factor: state.keystrokesPerCharacter)
+    }
+
+    private var otherDevicesChars: Int {
+        CharEstimate.characters(fromKeystrokes: state.otherDevicesTodayKeystrokes, factor: state.keystrokesPerCharacter)
     }
 
     private var permissionPrompt: some View {
@@ -109,6 +117,7 @@ struct MenuBarContentView: View {
     /// app and force the main window to the front on the next run-loop tick
     /// (after `openWindow` has created/registered it).
     private func openMainWindow() {
+        NSApp.setActivationPolicy(.regular)
         openWindow(id: "main")
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)

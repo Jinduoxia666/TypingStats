@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct TopAppView: View {
-    @State private var apps: [AppStat] = []
+    @State private var groups: [DeviceAppStats] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("今日应用排行").font(.headline)
 
-            if apps.isEmpty {
+            if groups.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "app.dashed").font(.largeTitle).foregroundStyle(.tertiary)
                     Text("今天还没有记录").foregroundStyle(.secondary)
@@ -15,11 +15,12 @@ struct TopAppView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(Array(apps.enumerated()), id: \.element.bundleId) { index, app in
-                            row(rank: index + 1, app: app)
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(groups) { group in
+                            deviceSection(group)
                         }
                     }
+                    .padding(.trailing, 12)
                 }
             }
         }
@@ -30,12 +31,34 @@ struct TopAppView: View {
 
     private var factor: Double { CharEstimate.factor }
 
+    /// Only label each section with its device when there's more than one — with a
+    /// single device the header would just be noise.
+    private var showsDeviceHeaders: Bool { groups.count > 1 }
+
     private func chars(_ app: AppStat) -> Int {
         CharEstimate.characters(fromKeystrokes: app.keystrokes, factor: factor)
     }
 
+    /// Global max across every device, so bar lengths are comparable device-to-device.
     private var maxTotal: Int {
-        max(apps.map(chars).max() ?? 1, 1)
+        max(groups.flatMap { $0.apps }.map(chars).max() ?? 1, 1)
+    }
+
+    private func deviceSection(_ group: DeviceAppStats) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if showsDeviceHeaders {
+                HStack(spacing: 6) {
+                    Image(systemName: group.isSelf ? "desktopcomputer" : "laptopcomputer")
+                    Text(group.isSelf ? "\(group.deviceName)（本机）" : group.deviceName)
+                        .fontWeight(.semibold)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            ForEach(Array(group.apps.enumerated()), id: \.element.bundleId) { index, app in
+                row(rank: index + 1, app: app)
+            }
+        }
     }
 
     private func row(rank: Int, app: AppStat) -> some View {
@@ -49,7 +72,10 @@ struct TopAppView: View {
                 HStack {
                     Text(app.appName).fontWeight(.medium).lineLimit(1)
                     Spacer()
-                    Text("\(chars(app)) 字").monospacedDigit().foregroundStyle(.secondary)
+                    Text("\(chars(app)) 字")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .frame(width: 72, alignment: .trailing)
                 }
                 GeometryReader { geo in
                     Capsule()
@@ -63,6 +89,6 @@ struct TopAppView: View {
     }
 
     private func reload() {
-        apps = MergedStats().topAppsToday(limit: 10)
+        groups = MergedStats().topAppsTodayByDevice(limit: 10)
     }
 }

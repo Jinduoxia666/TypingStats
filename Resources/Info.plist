@@ -29,6 +29,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 金多虾. All rights reserved.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>TypingStats 需要辅助功能权限来统计你的键盘按键次数（用于估算每天输入的字数）。我们只统计数量，不记录任何按键内容，不联网。</string>
+	<string>TypingStats 需要辅助功能权限来统计你的键盘按键次数（用于记录每天输入的字数）。我们只统计数量，不记录任何按键内容，不联网。</string>
 </dict>
 </plist>

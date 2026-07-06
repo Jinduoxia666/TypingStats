@@ -2,8 +2,9 @@ import SwiftUI
 import Charts
 
 struct HistoryChartView: View {
-    @State private var days: [DailyStat] = []
-    @State private var range = 30
+    @State private var days: [DeviceDayBreakdown] = []
+    @State private var range = 7
+    @State private var selectedDate: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -19,7 +20,7 @@ struct HistoryChartView: View {
                 .fixedSize()
             }
 
-            if days.allSatisfy({ $0.keystrokes == 0 }) {
+            if days.allSatisfy({ $0.totalKeystrokes == 0 }) {
                 emptyState
             } else {
                 chart
@@ -35,19 +36,54 @@ struct HistoryChartView: View {
     private var factor: Double { CharEstimate.factor }
 
     private var chart: some View {
-        Chart(days, id: \.date) { day in
-            BarMark(
-                x: .value("日期", shortLabel(day.date)),
-                y: .value("字数", CharEstimate.characters(fromKeystrokes: day.keystrokes, factor: factor))
-            )
-            .foregroundStyle(Color.accentColor)
+        ZStack(alignment: .topTrailing) {
+            Chart(chartSegments) { segment in
+                BarMark(
+                    x: .value("日期", segment.date),
+                    y: .value("字数", chars(segment.keystrokes))
+                )
+                .foregroundStyle(segmentColor(segment))
+            }
+            .chartXAxis {
+                AxisMarks(values: days.map(\.date)) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        if let key = value.as(String.self) {
+                            Text(shortLabel(key))
+                        }
+                    }
+                }
+            }
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                let frame = geo[proxy.plotAreaFrame]
+                                let x = location.x - frame.origin.x
+                                selectedDate = proxy.value(atX: x, as: String.self)
+                            case .ended:
+                                selectedDate = nil
+                            }
+                        }
+                }
+            }
+
+            if let selectedDay {
+                tooltip(for: selectedDay)
+            }
         }
+        .frame(minHeight: 260)
     }
 
     private var totals: some View {
-        let totalKeys = days.reduce(0) { $0 + $1.keystrokes }
+        let totalKeys = days.reduce(0) { $0 + $1.totalKeystrokes }
         let total = CharEstimate.characters(fromKeystrokes: totalKeys, factor: factor)
-        let activeDays = days.filter { $0.keystrokes > 0 }.count
+        let activeDays = days.filter { $0.totalKeystrokes > 0 }.count
         let average = activeDays > 0 ? total / activeDays : 0
         return HStack(spacing: 24) {
             totalItem("字数合计", total)
@@ -63,6 +99,60 @@ struct HistoryChartView: View {
         }
     }
 
+    private var chartSegments: [DeviceDayStat] {
+        days.flatMap(\.segments)
+    }
+
+    private var selectedDay: DeviceDayBreakdown? {
+        guard let selectedDate else { return nil }
+        return days.first { $0.date == selectedDate && $0.totalKeystrokes > 0 }
+    }
+
+    private func chars(_ keystrokes: Int) -> Int {
+        CharEstimate.characters(fromKeystrokes: keystrokes, factor: factor)
+    }
+
+    private func segmentColor(_ segment: DeviceDayStat) -> Color {
+        if segment.isSelf { return .accentColor }
+        let palette: [Color] = [.orange, .green, .purple, .pink, .teal]
+        let value = abs(segment.deviceId.hashValue)
+        return palette[value % palette.count]
+    }
+
+    private func tooltip(for day: DeviceDayBreakdown) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(shortLabel(day.date))
+                .font(.caption)
+                .fontWeight(.semibold)
+            ForEach(day.segments) { segment in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(segmentColor(segment))
+                        .frame(width: 7, height: 7)
+                    Text(segment.isSelf ? "本机" : segment.deviceName)
+                    Spacer()
+                    Text("\(chars(segment.keystrokes)) 字")
+                        .monospacedDigit()
+                }
+            }
+            Divider()
+            HStack {
+                Text("合计")
+                Spacer()
+                Text("\(chars(day.totalKeystrokes)) 字")
+                    .monospacedDigit()
+            }
+            .fontWeight(.medium)
+        }
+        .font(.caption)
+        .padding(10)
+        .frame(width: 180)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(radius: 6, y: 2)
+        .padding(8)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 6) {
             Image(systemName: "chart.bar.xaxis").font(.largeTitle).foregroundStyle(.tertiary)
@@ -72,9 +162,8 @@ struct HistoryChartView: View {
     }
 
     private func reload() {
-        // MergedStats.recentDays already returns the last N days oldest→newest,
-        // summed across this device and all synced devices.
-        days = MergedStats().recentDays(range)
+        days = MergedStats().recentDaysByDevice(range)
+        selectedDate = nil
     }
 
     /// "2026-06-18" → "06-18"

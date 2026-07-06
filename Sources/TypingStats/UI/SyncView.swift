@@ -48,7 +48,7 @@ struct SyncView: View {
                 }
             }
             if state.syncedDevices.count <= 1 {
-                Text("还没检测到其它设备。在另一台 Mac 上安装并登录同一 iCloud 账号即可自动出现。")
+                Text("还没检测到其他设备。在另一台 Mac 上安装并登录同一 iCloud 账号即可自动出现。")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

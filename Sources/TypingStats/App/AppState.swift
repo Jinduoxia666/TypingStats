@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
     private var currentDateKey = StatsService.dateKey(for: Date())
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
+    private var writeTimer: Timer?
     private let syncQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.sync", qos: .utility)
     private var isRunning = false
 
@@ -93,20 +94,38 @@ final class AppState: ObservableObject {
         }
         cloud.ensureFolder()
         refreshSync()
+        // Read the other devices often so the merged view stays fresh, but only
+        // write our own snapshot to iCloud every 5 minutes to limit churn.
         syncTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshSync() }
+            Task { @MainActor in self?.pullOthers() }
+        }
+        writeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pushSnapshot() }
         }
     }
 
-    /// Manual "sync now" (also called from the timer): push our snapshot, pull
-    /// the others, and republish the merged today total + device list.
+    /// Manual "sync now": push our snapshot, pull the others, and republish the
+    /// merged today total + device list.
     func syncNow() { refreshSync() }
 
     private func refreshSync() {
+        pushSnapshot()
+        pullOthers()
+    }
+
+    /// Write this device's snapshot to iCloud (on the serial sync queue).
+    private func pushSnapshot() {
+        guard cloud.isAvailable else { return }
+        let cloud = self.cloud
+        syncQueue.async { cloud.writeOwnSnapshot() }
+    }
+
+    /// Read every other device's snapshot and republish the merged today total
+    /// and the device list.
+    private func pullOthers() {
         guard cloud.isAvailable else { return }
         let cloud = self.cloud
         syncQueue.async { [weak self] in
-            cloud.writeOwnSnapshot()
             let others = cloud.otherSnapshots()
             let key = StatsService.dateKey(for: Date())
             let othersToday = others.reduce(0) { $0 + ($1.days[key]?.keystrokes ?? 0) }

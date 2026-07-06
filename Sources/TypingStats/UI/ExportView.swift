@@ -9,7 +9,7 @@ struct ExportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("把全部历史数据导出为文件。包含:日期、当日按键数、估算字数、当日 Top app。")
+            Text("把全部历史数据导出为文件。包含:日期、当日按键数、字数、当日 Top app。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
