@@ -17,6 +17,8 @@ final class AppState: ObservableObject {
     @Published private(set) var otherDevicesTodayKeystrokes: Int = 0
     @Published private(set) var syncAvailable: Bool = false
     @Published private(set) var syncedDevices: [SyncedDeviceInfo] = []
+    @Published private(set) var cpuTemperatureCelsius: Double?
+    @Published private(set) var systemThermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
@@ -31,11 +33,14 @@ final class AppState: ObservableObject {
     private let stats = StatsService()
     private let recorder = KeystrokeRecorder()
     private let cloud = CloudSyncStore()
+    private let cpuTemperatureReader = CPUTemperatureReader()
     private var currentDateKey = StatsService.dateKey(for: Date())
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
     private var writeTimer: Timer?
+    private var cpuTemperatureTimer: Timer?
     private let syncQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.sync", qos: .utility)
+    private let hardwareQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.hardware", qos: .utility)
     private var isRunning = false
 
     static let logger = Logger(subsystem: "com.jinduoxia.TypingStats", category: "monitor")
@@ -64,6 +69,7 @@ final class AppState: ObservableObject {
         refreshPermissions()
         startPermissionWatcher()
         startSync()
+        startHardwareMonitoring()
     }
 
     func start() {
@@ -168,6 +174,25 @@ final class AppState: ObservableObject {
     private func startPermissionWatcher() {
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshPermissions() }
+        }
+    }
+
+    private func startHardwareMonitoring() {
+        refreshCPUTemperature()
+        cpuTemperatureTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshCPUTemperature() }
+        }
+    }
+
+    private func refreshCPUTemperature() {
+        let reader = cpuTemperatureReader
+        hardwareQueue.async { [weak self] in
+            let value = reader.readCelsius()
+            let thermalState = ProcessInfo.processInfo.thermalState
+            Task { @MainActor in
+                self?.cpuTemperatureCelsius = value
+                self?.systemThermalState = thermalState
+            }
         }
     }
 

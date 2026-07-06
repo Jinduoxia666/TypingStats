@@ -77,6 +77,17 @@ struct MenuBarContentView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+            HStack(spacing: 6) {
+                Image(systemName: hardwareIconName)
+                    .foregroundStyle(.secondary)
+                Text(hardwareLabelText)
+                Spacer()
+                Text(hardwareValueText)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .padding(.top, 8)
         }
     }
 
@@ -90,6 +101,33 @@ struct MenuBarContentView: View {
 
     private var otherDevicesChars: Int {
         CharEstimate.characters(fromKeystrokes: state.otherDevicesTodayKeystrokes, factor: state.keystrokesPerCharacter)
+    }
+
+    private var hardwareIconName: String {
+        state.cpuTemperatureCelsius == nil ? "thermometer.sun" : "thermometer.medium"
+    }
+
+    private var hardwareLabelText: String {
+        state.cpuTemperatureCelsius == nil ? "系统热状态" : "CPU 温度"
+    }
+
+    private var hardwareValueText: String {
+        if let value = state.cpuTemperatureCelsius {
+            return "\(Int(value.rounded()))°C"
+        }
+
+        switch state.systemThermalState {
+        case .nominal:
+            return "正常"
+        case .fair:
+            return "轻微"
+        case .serious:
+            return "严重"
+        case .critical:
+            return "危险"
+        @unknown default:
+            return "未知"
+        }
     }
 
     private var permissionPrompt: some View {
