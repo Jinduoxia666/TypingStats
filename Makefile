@@ -8,7 +8,7 @@ STAGING     := $(BUILD_DIR)/dmg-staging
 
 # Stable signing identity so the Accessibility (TCC) grant survives rebuilds.
 # Falls back to ad-hoc (-) if the cert isn't present on this machine.
-SIGN_ID     := Apple Development: REDACTED (P7AL4LB2FG)
+SIGN_ID     := Apple Development: REDACTED (ZR56Z9UGC3)
 
 .PHONY: all build app run dmg test clean reset-perm
 

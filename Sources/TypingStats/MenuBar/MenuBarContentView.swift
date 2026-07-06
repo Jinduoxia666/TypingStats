@@ -88,6 +88,28 @@ struct MenuBarContentView: View {
             }
             .font(.caption)
             .padding(.top, 8)
+
+            HStack(spacing: 6) {
+                Image(systemName: "memorychip")
+                    .foregroundStyle(.secondary)
+                Text("本应用内存")
+                Spacer()
+                Text(appMemoryText)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+
+            HStack(spacing: 6) {
+                Image(systemName: "chart.pie")
+                    .foregroundStyle(.secondary)
+                Text("系统内存")
+                Spacer()
+                Text(systemMemoryText)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
         }
     }
 
@@ -128,6 +150,25 @@ struct MenuBarContentView: View {
         @unknown default:
             return "未知"
         }
+    }
+
+    private var appMemoryText: String {
+        guard let memoryStats = state.memoryStats else { return "不可用" }
+        return formatBytes(memoryStats.appResidentBytes)
+    }
+
+    private var systemMemoryText: String {
+        guard let memoryStats = state.memoryStats else { return "不可用" }
+        return "\(formatBytes(memoryStats.systemUsedBytes)) / \(formatBytes(memoryStats.systemTotalBytes))"
+    }
+
+    private func formatBytes(_ bytes: UInt64) -> String {
+        let value = Double(bytes)
+        let gb = value / 1_073_741_824
+        if gb >= 1 {
+            return String(format: "%.1f GB", gb)
+        }
+        return "\(Int((value / 1_048_576).rounded())) MB"
     }
 
     private var permissionPrompt: some View {

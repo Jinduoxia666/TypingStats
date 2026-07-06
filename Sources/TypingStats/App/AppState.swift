@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
     @Published private(set) var syncedDevices: [SyncedDeviceInfo] = []
     @Published private(set) var cpuTemperatureCelsius: Double?
     @Published private(set) var systemThermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    @Published private(set) var memoryStats: MemoryStats?
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
@@ -34,6 +35,7 @@ final class AppState: ObservableObject {
     private let recorder = KeystrokeRecorder()
     private let cloud = CloudSyncStore()
     private let cpuTemperatureReader = CPUTemperatureReader()
+    private let memoryStatsReader = MemoryStatsReader()
     private var currentDateKey = StatsService.dateKey(for: Date())
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
@@ -178,20 +180,23 @@ final class AppState: ObservableObject {
     }
 
     private func startHardwareMonitoring() {
-        refreshCPUTemperature()
+        refreshHardwareStats()
         cpuTemperatureTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshCPUTemperature() }
+            Task { @MainActor in self?.refreshHardwareStats() }
         }
     }
 
-    private func refreshCPUTemperature() {
-        let reader = cpuTemperatureReader
+    private func refreshHardwareStats() {
+        let temperatureReader = cpuTemperatureReader
+        let memoryReader = memoryStatsReader
         hardwareQueue.async { [weak self] in
-            let value = reader.readCelsius()
+            let value = temperatureReader.readCelsius()
             let thermalState = ProcessInfo.processInfo.thermalState
+            let memoryStats = memoryReader.read()
             Task { @MainActor in
                 self?.cpuTemperatureCelsius = value
                 self?.systemThermalState = thermalState
+                self?.memoryStats = memoryStats
             }
         }
     }
