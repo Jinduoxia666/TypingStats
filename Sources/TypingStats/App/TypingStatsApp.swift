@@ -40,7 +40,7 @@ struct TypingStatsApp: App {
     }
 }
 
-private enum AppActivation {
+enum AppActivation {
     static func showMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)

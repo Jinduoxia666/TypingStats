@@ -10,6 +10,7 @@ struct DashboardView: View {
             todayTab.tabItem { Label("今日", systemImage: "calendar") }
             HistoryChartView().tabItem { Label("历史", systemImage: "chart.bar") }
             TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
+            ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
         }
         .padding()
     }

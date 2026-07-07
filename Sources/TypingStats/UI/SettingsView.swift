@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -28,6 +29,12 @@ struct SettingsView: View {
                 }
             }
 
+            HStack {
+                Text("剪贴板历史快捷键")
+                Spacer()
+                ShortcutRecorderButton(shortcut: $state.clipboardShortcut)
+            }
+
             Text("字数 = 计入的按键数 ÷ 该系数。只统计 a–z、A–Z、0–9,标点/空格/回车/方向键不计入。中文拼音一般设 2–3;纯英文可设 1。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -42,5 +49,45 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
+    }
+}
+
+private struct ShortcutRecorderButton: View {
+    @Binding var shortcut: ClipboardShortcut
+    @State private var isRecording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        Button(isRecording ? "按下快捷键..." : shortcut.displayText) {
+            toggleRecording()
+        }
+        .buttonStyle(.bordered)
+        .onDisappear {
+            stopRecording()
+        }
+    }
+
+    private func toggleRecording() {
+        isRecording ? stopRecording() : startRecording()
+    }
+
+    private func startRecording() {
+        stopRecording()
+        isRecording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let newShortcut = ClipboardShortcut(event: event)
+            guard newShortcut.isUsable else { return nil }
+            shortcut = newShortcut
+            stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitor = nil
+        isRecording = false
     }
 }

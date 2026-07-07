@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import os.log
+import AppKit
 
 @MainActor
 final class AppState: ObservableObject {
@@ -20,12 +21,23 @@ final class AppState: ObservableObject {
     @Published private(set) var cpuTemperatureCelsius: Double?
     @Published private(set) var systemThermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @Published private(set) var memoryStats: MemoryStats?
+    @Published private(set) var clipboardItems: [ClipboardHistoryItem] = []
+    @Published private(set) var clipboardSelectionIndex: Int = 0
+    @Published var clipboardShortcut: ClipboardShortcut {
+        didSet {
+            UserDefaults.standard.set(Int(clipboardShortcut.keyCode), forKey: Keys.clipboardShortcutKeyCode)
+            UserDefaults.standard.set(Int(clipboardShortcut.modifiers), forKey: Keys.clipboardShortcutModifiers)
+            clipboardHotKeyMonitor?.update(shortcut: clipboardShortcut)
+        }
+    }
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
 
     private enum Keys {
         static let excluded = "excludedBundleIds"
+        static let clipboardShortcutKeyCode = "clipboardShortcutKeyCode"
+        static let clipboardShortcutModifiers = "clipboardShortcutModifiers"
     }
 
     private let monitor: KeystrokeMonitor
@@ -36,11 +48,16 @@ final class AppState: ObservableObject {
     private let cloud = CloudSyncStore()
     private let cpuTemperatureReader = CPUTemperatureReader()
     private let memoryStatsReader = MemoryStatsReader()
+    private let clipboardHistory = ClipboardHistoryStore()
     private var currentDateKey = StatsService.dateKey(for: Date())
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
     private var writeTimer: Timer?
     private var cpuTemperatureTimer: Timer?
+    private var clipboardCancellable: AnyCancellable?
+    private var clipboardHotKeyMonitor: ClipboardHotKeyMonitor?
+    private var clipboardWindowController: ClipboardHistoryWindowController?
+    private weak var clipboardTargetApplication: NSRunningApplication?
     private let syncQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.sync", qos: .utility)
     private let hardwareQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.hardware", qos: .utility)
     private var isRunning = false
@@ -52,6 +69,11 @@ final class AppState: ObservableObject {
         self.excludedBundleIds = Set(defaults.stringArray(forKey: Keys.excluded) ?? [])
         let savedFactor = defaults.double(forKey: CharEstimate.factorKey)
         self.keystrokesPerCharacter = savedFactor > 0 ? savedFactor : CharEstimate.defaultFactor
+        let savedKeyCode = defaults.integer(forKey: Keys.clipboardShortcutKeyCode)
+        let savedModifiers = defaults.integer(forKey: Keys.clipboardShortcutModifiers)
+        self.clipboardShortcut = savedKeyCode > 0 && savedModifiers > 0
+            ? ClipboardShortcut(keyCode: UInt32(savedKeyCode), modifiers: UInt32(savedModifiers))
+            : .defaultValue
 
         self.permissions = PermissionsManager()
         self.database = DatabaseManager.shared
@@ -72,6 +94,7 @@ final class AppState: ObservableObject {
         startPermissionWatcher()
         startSync()
         startHardwareMonitoring()
+        startClipboardHistory()
     }
 
     func start() {
@@ -83,10 +106,53 @@ final class AppState: ObservableObject {
 
     func stop() {
         monitor.stop()
+        clipboardHistory.stop()
         recorder.flushNow()
         let cloud = self.cloud
         syncQueue.async { cloud.writeOwnSnapshot() }
         isRunning = false
+    }
+
+    func showClipboardHistory() {
+        clipboardTargetApplication = NSWorkspace.shared.frontmostApplication
+        selectClipboardItem(at: 0)
+        if clipboardWindowController == nil {
+            clipboardWindowController = ClipboardHistoryWindowController(state: self)
+        }
+        clipboardWindowController?.show()
+    }
+
+    func pasteClipboardItem(_ item: ClipboardHistoryItem) {
+        clipboardHistory.writeToPasteboard(item)
+        clipboardWindowController?.close()
+
+        let target = clipboardTargetApplication
+        AppActivation.returnToMenuBarOnly()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            target?.activate(options: [.activateIgnoringOtherApps])
+            Self.sendCommandV()
+        }
+    }
+
+    func clearClipboardHistory() {
+        clipboardHistory.clear()
+    }
+
+    func selectClipboardItem(at index: Int) {
+        guard !clipboardItems.isEmpty else {
+            clipboardSelectionIndex = 0
+            return
+        }
+        clipboardSelectionIndex = min(max(index, 0), min(clipboardItems.count, 8) - 1)
+    }
+
+    func moveClipboardSelection(by delta: Int) {
+        selectClipboardItem(at: clipboardSelectionIndex + delta)
+    }
+
+    func pasteSelectedClipboardItem() {
+        guard clipboardItems.indices.contains(clipboardSelectionIndex) else { return }
+        pasteClipboardItem(clipboardItems[clipboardSelectionIndex])
     }
 
     // MARK: - iCloud sync
@@ -186,6 +252,20 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func startClipboardHistory() {
+        clipboardItems = clipboardHistory.items
+        clipboardCancellable = clipboardHistory.$items.sink { [weak self] items in
+            self?.clipboardItems = items
+            self?.selectClipboardItem(at: self?.clipboardSelectionIndex ?? 0)
+        }
+        clipboardHistory.start()
+
+        let monitor = ClipboardHotKeyMonitor(shortcut: clipboardShortcut) { [weak self] in
+            self?.showClipboardHistory()
+        }
+        clipboardHotKeyMonitor = monitor
+    }
+
     private func refreshHardwareStats() {
         let temperatureReader = cpuTemperatureReader
         let memoryReader = memoryStatsReader
@@ -211,6 +291,16 @@ final class AppState: ObservableObject {
         if let id = frontApp?.bundleId, excludedBundleIds.contains(id) { return }
         todayKeystrokes += 1
         recorder.record(app: frontApp)
+    }
+
+    private static func sendCommandV() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        keyDown?.flags = .maskCommand
+        keyUp?.flags = .maskCommand
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
     }
 
     /// When the local day flips while the app is running, reset the in-memory
