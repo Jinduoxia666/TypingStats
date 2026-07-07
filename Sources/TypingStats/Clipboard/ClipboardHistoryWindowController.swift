@@ -5,7 +5,8 @@ import SwiftUI
 final class ClipboardHistoryWindowController {
     private weak var state: AppState?
     private var window: KeyablePanel?
-    private var keyMonitor: Any?
+    private var keyInterceptor: ToolPanelKeyInterceptor?
+    private var presentationToken = UUID()
 
     init(state: AppState) {
         self.state = state
@@ -13,16 +14,19 @@ final class ClipboardHistoryWindowController {
 
     func show() {
         guard let state else { return }
+        presentationToken = UUID()
 
         if window == nil {
             let panel = KeyablePanel(
                 contentRect: NSRect(x: 0, y: 0, width: 460, height: 292),
-                styleMask: [.borderless],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
             panel.isReleasedWhenClosed = false
-            panel.level = .floating
+            panel.isFloatingPanel = true
+            panel.hidesOnDeactivate = false
+            panel.level = .popUpMenu
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.isOpaque = false
             panel.backgroundColor = .clear
@@ -37,59 +41,56 @@ final class ClipboardHistoryWindowController {
         resizeForContent()
         positionNearCursor()
         installKeyMonitor()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        bringPanelToFront()
     }
 
-    func close() {
-        window?.close()
+    func close(returnToMenuBarOnly: Bool = true) {
+        presentationToken = UUID()
         removeKeyMonitor()
-        AppActivation.returnToMenuBarOnly()
+        window?.orderOut(nil)
+        window?.close()
+        window = nil
+        if returnToMenuBarOnly {
+            AppActivation.returnToMenuBarOnly()
+        }
     }
 
     private func installKeyMonitor() {
         removeKeyMonitor()
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            return self.handle(event) ? nil : event
+        let interceptor = ToolPanelKeyInterceptor(keyCodes: [18, 19, 20, 21, 22, 23, 26, 28, 36, 53, 76, 125, 126]) { [weak self] keyCode in
+            self?.handle(keyCode)
         }
+        interceptor.start()
+        keyInterceptor = interceptor
     }
 
     private func removeKeyMonitor() {
-        if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
-        }
-        keyMonitor = nil
+        keyInterceptor?.stop()
+        keyInterceptor = nil
     }
 
-    private func handle(_ event: NSEvent) -> Bool {
-        guard let state else { return false }
-        switch event.keyCode {
+    private func handle(_ keyCode: UInt16) {
+        guard let state else { return }
+        switch keyCode {
         case 53:
             close()
-            return true
         case 125:
             state.moveClipboardSelection(by: 1)
-            return true
         case 126:
             state.moveClipboardSelection(by: -1)
-            return true
         case 36, 76:
             state.pasteSelectedClipboardItem()
-            return true
         default:
             let mapping: [UInt16: Int] = [
                 18: 0, 19: 1, 20: 2, 21: 3,
                 23: 4, 22: 5, 26: 6, 28: 7
             ]
-            guard let index = mapping[event.keyCode],
+            guard let index = mapping[keyCode],
                   state.clipboardItems.indices.contains(index) else {
-                return false
+                return
             }
             state.selectClipboardItem(at: index)
             state.pasteSelectedClipboardItem()
-            return true
         }
     }
 
@@ -112,6 +113,18 @@ final class ClipboardHistoryWindowController {
         let x = min(max(preferredX, screenFrame.minX + margin), screenFrame.maxX - frame.width - margin)
         let y = min(max(preferredY, screenFrame.minY + margin), screenFrame.maxY - frame.height - margin)
         window.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func bringPanelToFront() {
+        let token = presentationToken
+        for delay in [0.0, 0.05, 0.15] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, token == self.presentationToken, let window = self.window else { return }
+                window.orderFrontRegardless()
+                window.makeKey()
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 }
 

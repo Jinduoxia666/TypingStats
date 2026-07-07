@@ -23,6 +23,9 @@ final class AppState: ObservableObject {
     @Published private(set) var memoryStats: MemoryStats?
     @Published private(set) var clipboardItems: [ClipboardHistoryItem] = []
     @Published private(set) var clipboardSelectionIndex: Int = 0
+    @Published var timestampInput: String = ""
+    @Published private(set) var timestampSelectionIndex: Int = 0
+    @Published private(set) var timestampNow = Date()
     @Published var clipboardShortcut: ClipboardShortcut {
         didSet {
             UserDefaults.standard.set(Int(clipboardShortcut.keyCode), forKey: Keys.clipboardShortcutKeyCode)
@@ -30,14 +33,26 @@ final class AppState: ObservableObject {
             clipboardHotKeyMonitor?.update(shortcut: clipboardShortcut)
         }
     }
+    @Published var timestampShortcut: ClipboardShortcut {
+        didSet {
+            UserDefaults.standard.set(Int(timestampShortcut.keyCode), forKey: Keys.timestampShortcutKeyCode)
+            UserDefaults.standard.set(Int(timestampShortcut.modifiers), forKey: Keys.timestampShortcutModifiers)
+            timestampHotKeyMonitor?.update(shortcut: timestampShortcut)
+        }
+    }
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
+    var timestampItems: [TimestampConversionItem] {
+        TimestampConversionItem.items(input: timestampInput, now: timestampNow)
+    }
 
     private enum Keys {
         static let excluded = "excludedBundleIds"
         static let clipboardShortcutKeyCode = "clipboardShortcutKeyCode"
         static let clipboardShortcutModifiers = "clipboardShortcutModifiers"
+        static let timestampShortcutKeyCode = "timestampShortcutKeyCode"
+        static let timestampShortcutModifiers = "timestampShortcutModifiers"
     }
 
     private let monitor: KeystrokeMonitor
@@ -54,10 +69,17 @@ final class AppState: ObservableObject {
     private var syncTimer: Timer?
     private var writeTimer: Timer?
     private var cpuTemperatureTimer: Timer?
+    private var timestampTimer: Timer?
     private var clipboardCancellable: AnyCancellable?
     private var clipboardHotKeyMonitor: ClipboardHotKeyMonitor?
     private var clipboardWindowController: ClipboardHistoryWindowController?
-    private weak var clipboardTargetApplication: NSRunningApplication?
+    private var clipboardTargetApplication: NSRunningApplication?
+    private var timestampHotKeyMonitor: ClipboardHotKeyMonitor?
+    private var timestampWindowController: TimestampToolWindowController?
+    private var timestampTargetApplication: NSRunningApplication?
+    private var lastPasteTargetApplication: NSRunningApplication?
+    private var suppressToolWindowsUntil: Date?
+    private var isRecordingShortcut = false
     private let syncQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.sync", qos: .utility)
     private let hardwareQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.hardware", qos: .utility)
     private var isRunning = false
@@ -74,6 +96,11 @@ final class AppState: ObservableObject {
         self.clipboardShortcut = savedKeyCode > 0 && savedModifiers > 0
             ? ClipboardShortcut(keyCode: UInt32(savedKeyCode), modifiers: UInt32(savedModifiers))
             : .defaultValue
+        let savedTimestampKeyCode = defaults.integer(forKey: Keys.timestampShortcutKeyCode)
+        let savedTimestampModifiers = defaults.integer(forKey: Keys.timestampShortcutModifiers)
+        self.timestampShortcut = savedTimestampKeyCode > 0 && savedTimestampModifiers > 0
+            ? ClipboardShortcut(keyCode: UInt32(savedTimestampKeyCode), modifiers: UInt32(savedTimestampModifiers))
+            : .timestampDefaultValue
 
         self.permissions = PermissionsManager()
         self.database = DatabaseManager.shared
@@ -95,6 +122,7 @@ final class AppState: ObservableObject {
         startSync()
         startHardwareMonitoring()
         startClipboardHistory()
+        startTimestampTool()
     }
 
     func start() {
@@ -114,7 +142,9 @@ final class AppState: ObservableObject {
     }
 
     func showClipboardHistory() {
-        clipboardTargetApplication = NSWorkspace.shared.frontmostApplication
+        guard canOpenToolWindow else { return }
+        closeTimestampTool()
+        clipboardTargetApplication = currentPasteTargetApplication()
         selectClipboardItem(at: 0)
         if clipboardWindowController == nil {
             clipboardWindowController = ClipboardHistoryWindowController(state: self)
@@ -122,20 +152,132 @@ final class AppState: ObservableObject {
         clipboardWindowController?.show()
     }
 
-    func closeClipboardHistory() {
-        clipboardWindowController?.close()
+    func closeClipboardHistory(returnToMenuBarOnly: Bool = true) {
+        clipboardWindowController?.close(returnToMenuBarOnly: returnToMenuBarOnly)
         clipboardTargetApplication = nil
+    }
+
+    func showTimestampTool() {
+        guard canOpenToolWindow else { return }
+        closeClipboardHistory()
+        timestampTargetApplication = currentPasteTargetApplication()
+        fillTimestampInputFromPasteboardIfPossible()
+        startTimestampTimer()
+        selectTimestampItem(at: 0)
+        if timestampWindowController == nil {
+            timestampWindowController = TimestampToolWindowController(state: self)
+        }
+        timestampWindowController?.show()
+    }
+
+    private func fillTimestampInputFromPasteboardIfPossible() {
+        guard let value = NSPasteboard.general.string(forType: .string),
+              TimestampConversionItem.isConvertibleInput(value) else {
+            return
+        }
+        timestampInput = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func closeTimestampTool(returnToMenuBarOnly: Bool = true) {
+        timestampWindowController?.close(returnToMenuBarOnly: returnToMenuBarOnly)
+        timestampTargetApplication = nil
+        stopTimestampTimer()
+    }
+
+    func prepareToOpenMainWindow() {
+        suppressToolWindowsUntil = Date().addingTimeInterval(0.6)
+        closeClipboardHistory(returnToMenuBarOnly: false)
+        closeTimestampTool(returnToMenuBarOnly: false)
+    }
+
+    func setShortcutRecording(_ recording: Bool) {
+        isRecordingShortcut = recording
+        if recording {
+            suppressToolWindowsUntil = .distantFuture
+            closeClipboardHistory(returnToMenuBarOnly: false)
+            closeTimestampTool(returnToMenuBarOnly: false)
+        } else {
+            suppressToolWindowsUntil = Date().addingTimeInterval(0.25)
+        }
+    }
+
+    private var canOpenToolWindow: Bool {
+        !isRecordingShortcut && !isSuppressingToolWindows
+    }
+
+    private var isSuppressingToolWindows: Bool {
+        guard let suppressToolWindowsUntil else { return false }
+        if Date() < suppressToolWindowsUntil { return true }
+        self.suppressToolWindowsUntil = nil
+        return false
+    }
+
+    func selectTimestampItem(at index: Int) {
+        let items = timestampItems
+        guard !items.isEmpty else {
+            timestampSelectionIndex = 0
+            return
+        }
+        timestampSelectionIndex = min(max(index, 0), items.count - 1)
+    }
+
+    func moveTimestampSelection(by delta: Int) {
+        selectTimestampItem(at: timestampSelectionIndex + delta)
+    }
+
+    func pasteSelectedTimestampItem() {
+        let items = timestampItems
+        guard items.indices.contains(timestampSelectionIndex) else { return }
+        pasteTimestampItem(items[timestampSelectionIndex])
+    }
+
+    func pasteTimestampItem(_ item: TimestampConversionItem) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.value, forType: .string)
+        timestampWindowController?.close()
+
+        pasteIntoTarget(timestampTargetApplication)
+    }
+
+    private func startTimestampTimer() {
+        timestampTimer?.invalidate()
+        timestampNow = Date()
+        timestampTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.timestampNow = Date() }
+        }
+    }
+
+    private func stopTimestampTimer() {
+        timestampTimer?.invalidate()
+        timestampTimer = nil
     }
 
     func pasteClipboardItem(_ item: ClipboardHistoryItem) {
         clipboardHistory.writeToPasteboard(item)
         clipboardWindowController?.close()
 
-        let target = clipboardTargetApplication
+        pasteIntoTarget(clipboardTargetApplication)
+    }
+
+    private func currentPasteTargetApplication() -> NSRunningApplication? {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            return lastPasteTargetApplication
+        }
+        if app.processIdentifier == NSRunningApplication.current.processIdentifier {
+            return lastPasteTargetApplication
+        }
+        lastPasteTargetApplication = app
+        return app
+    }
+
+    private func pasteIntoTarget(_ target: NSRunningApplication?) {
+        guard let target, !target.isTerminated else { return }
         AppActivation.returnToMenuBarOnly()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            target?.activate(options: [.activateIgnoringOtherApps])
-            Self.sendCommandV()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            target.activate(options: [.activateIgnoringOtherApps])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                Self.sendCommandV()
+            }
         }
     }
 
@@ -270,6 +412,17 @@ final class AppState: ObservableObject {
             self?.showClipboardHistory()
         }
         clipboardHotKeyMonitor = monitor
+    }
+
+    private func startTimestampTool() {
+        let monitor = ClipboardHotKeyMonitor(
+            shortcut: timestampShortcut,
+            signature: "TPST",
+            id: 2
+        ) { [weak self] in
+            self?.showTimestampTool()
+        }
+        timestampHotKeyMonitor = monitor
     }
 
     private func refreshHardwareStats() {

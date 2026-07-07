@@ -196,11 +196,11 @@ struct MenuBarContentView: View {
     /// app and force the main window to the front on the next run-loop tick
     /// (after `openWindow` has created/registered it).
     private func openMainWindow() {
-        state.closeClipboardHistory()
+        state.prepareToOpenMainWindow()
         NSApp.setActivationPolicy(.regular)
         openWindow(id: "main")
         DispatchQueue.main.async {
-            state.closeClipboardHistory()
+            state.prepareToOpenMainWindow()
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
         }

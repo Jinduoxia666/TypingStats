@@ -25,6 +25,7 @@ struct TypingStatsApp: App {
                     }
                 )
                 .onAppear {
+                    appState.prepareToOpenMainWindow()
                     AppActivation.showMainWindow()
                 }
                 .onDisappear {

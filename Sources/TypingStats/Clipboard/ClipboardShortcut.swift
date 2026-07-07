@@ -10,6 +10,11 @@ struct ClipboardShortcut: Equatable {
         modifiers: UInt32(cmdKey | optionKey | controlKey)
     )
 
+    static let timestampDefaultValue = ClipboardShortcut(
+        keyCode: UInt32(kVK_ANSI_T),
+        modifiers: UInt32(cmdKey | optionKey | controlKey)
+    )
+
     var displayText: String {
         var parts: [String] = []
         if modifiers & UInt32(controlKey) != 0 { parts.append("⌃") }

@@ -266,6 +266,7 @@ private struct ClipboardHoverPreview: View {
 private struct ClipboardHistoryList: View {
     let items: [ClipboardHistoryItem]
     let onSelect: (ClipboardHistoryItem) -> Void
+    @State private var detailItem: ClipboardHistoryItem?
 
     var body: some View {
         Group {
@@ -284,11 +285,17 @@ private struct ClipboardHistoryList: View {
             } else {
                 List(items) { item in
                     ClipboardHistoryRow(item: item) {
-                        onSelect(item)
+                        detailItem = item
                     }
                     .listRowSeparator(.visible)
                 }
                 .listStyle(.inset)
+            }
+        }
+        .sheet(item: $detailItem) { item in
+            ClipboardDetailView(item: item) {
+                detailItem = nil
+                onSelect(item)
             }
         }
     }
@@ -311,7 +318,7 @@ private struct ClipboardHistoryRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Image(systemName: "arrow.turn.down.left")
+                Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
@@ -344,6 +351,91 @@ private struct ClipboardHistoryRow: View {
                     .frame(width: 58, height: 46)
                     .background(.quaternary.opacity(0.45))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var timeText: String {
+        Self.formatter.string(from: item.createdAt)
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日 HH:mm"
+        return formatter
+    }()
+}
+
+private struct ClipboardDetailView: View {
+    let item: ClipboardHistoryItem
+    let onPaste: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(title, systemImage: item.kind == .text ? "doc.text" : "photo")
+                    .font(.headline)
+                Spacer()
+                Text(timeText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            detailContent
+
+            HStack {
+                Button("关闭") {
+                    dismiss()
+                }
+                Spacer()
+                Button("粘贴") {
+                    onPaste()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: 520, height: 420)
+    }
+
+    private var title: String {
+        item.kind == .text ? "剪贴板文字" : "剪贴板图片"
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch item.kind {
+        case .text:
+            ScrollView {
+                Text(item.previewTitle)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.quaternary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        case .image:
+            if let data = item.imagePNGData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.quaternary.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 34))
+                        .foregroundStyle(.secondary)
+                    Text("图片不可预览")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }

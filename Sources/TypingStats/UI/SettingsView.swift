@@ -32,7 +32,19 @@ struct SettingsView: View {
             HStack {
                 Text("剪贴板历史快捷键")
                 Spacer()
-                ShortcutRecorderButton(shortcut: $state.clipboardShortcut)
+                ShortcutRecorderButton(
+                    shortcut: $state.clipboardShortcut,
+                    onRecordingChanged: state.setShortcutRecording
+                )
+            }
+
+            HStack {
+                Text("时间戳转换快捷键")
+                Spacer()
+                ShortcutRecorderButton(
+                    shortcut: $state.timestampShortcut,
+                    onRecordingChanged: state.setShortcutRecording
+                )
             }
 
             Text("字数 = 计入的按键数 ÷ 该系数。只统计 a–z、A–Z、0–9,标点/空格/回车/方向键不计入。中文拼音一般设 2–3;纯英文可设 1。")
@@ -54,6 +66,7 @@ struct SettingsView: View {
 
 private struct ShortcutRecorderButton: View {
     @Binding var shortcut: ClipboardShortcut
+    let onRecordingChanged: (Bool) -> Void
     @State private var isRecording = false
     @State private var monitor: Any?
 
@@ -74,6 +87,7 @@ private struct ShortcutRecorderButton: View {
     private func startRecording() {
         stopRecording()
         isRecording = true
+        onRecordingChanged(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let newShortcut = ClipboardShortcut(event: event)
             guard newShortcut.isUsable else { return nil }
@@ -89,5 +103,6 @@ private struct ShortcutRecorderButton: View {
         }
         monitor = nil
         isRecording = false
+        onRecordingChanged(false)
     }
 }
