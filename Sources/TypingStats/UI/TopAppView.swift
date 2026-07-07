@@ -56,12 +56,12 @@ struct TopAppView: View {
                 .foregroundStyle(.secondary)
             }
             ForEach(Array(group.apps.enumerated()), id: \.element.bundleId) { index, app in
-                row(rank: index + 1, app: app)
+                row(rank: index + 1, app: app, group: group)
             }
         }
     }
 
-    private func row(rank: Int, app: AppStat) -> some View {
+    private func row(rank: Int, app: AppStat, group: DeviceAppStats) -> some View {
         HStack(spacing: 12) {
             Text("\(rank)")
                 .monospacedDigit()
@@ -79,7 +79,7 @@ struct TopAppView: View {
                 }
                 GeometryReader { geo in
                     Capsule()
-                        .fill(Color.accentColor.opacity(0.25))
+                        .fill(DeviceColor.color(for: group.id, isSelf: group.isSelf).opacity(0.35))
                         .frame(width: max(4, geo.size.width * CGFloat(chars(app)) / CGFloat(maxTotal)))
                 }
                 .frame(height: 6)

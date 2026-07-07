@@ -2,7 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject private var state: AppState
-    @State private var todayApps: [AppStat] = []
+    @State private var todayApps: [DashboardAppBreakdown] = []
     @State private var weekDays: [DeviceDayBreakdown] = []
 
     var body: some View {
@@ -87,12 +87,11 @@ struct DashboardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            deviceLegend
             HStack(alignment: .bottom, spacing: 8) {
                 ForEach(weekDays) { day in
                     VStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(day.totalKeystrokes > 0 ? Color.accentColor.opacity(0.75) : Color.secondary.opacity(0.16))
-                            .frame(height: barHeight(for: day))
+                        stackedDayBar(day)
                         Text(shortLabel(day.date))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -127,6 +126,7 @@ struct DashboardView: View {
                 ForEach(Array(todayApps.prefix(3).enumerated()), id: \.element.bundleId) { index, app in
                     appRow(rank: index + 1, app: app)
                 }
+                deviceLegend
             }
         }
         .padding(14)
@@ -134,7 +134,7 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func appRow(rank: Int, app: AppStat) -> some View {
+    private func appRow(rank: Int, app: DashboardAppBreakdown) -> some View {
         HStack(spacing: 10) {
             Text("\(rank)")
                 .font(.caption)
@@ -147,14 +147,12 @@ struct DashboardView: View {
                         .fontWeight(.medium)
                         .lineLimit(1)
                     Spacer()
-                    Text("\(chars(app.keystrokes)) 字")
+                    Text("\(chars(app.totalKeystrokes)) 字")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
                 GeometryReader { geo in
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.accentColor.opacity(0.35))
-                        .frame(width: max(4, geo.size.width * CGFloat(chars(app.keystrokes)) / CGFloat(maxTopAppChars)))
+                    stackedAppBar(app, width: geo.size.width)
                 }
                 .frame(height: 6)
             }
@@ -188,7 +186,7 @@ struct DashboardView: View {
     }
 
     private var maxTopAppChars: Int {
-        max(todayApps.map { chars($0.keystrokes) }.max() ?? 1, 1)
+        max(todayApps.map { chars($0.totalKeystrokes) }.max() ?? 1, 1)
     }
 
     private var weeklyAverageChars: Int {
@@ -215,15 +213,158 @@ struct DashboardView: View {
         return max(12, 86 * CGFloat(value) / CGFloat(maxWeekChars))
     }
 
+    private func stackedDayBar(_ day: DeviceDayBreakdown) -> some View {
+        let height = barHeight(for: day)
+        return VStack(spacing: 0) {
+            if day.totalKeystrokes > 0 {
+                ForEach(day.segments) { segment in
+                    Rectangle()
+                        .fill(DeviceColor.color(for: segment.deviceId, isSelf: segment.isSelf).opacity(0.78))
+                        .frame(height: max(3, height * CGFloat(segment.keystrokes) / CGFloat(day.totalKeystrokes)))
+                }
+            } else {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.16))
+            }
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func stackedAppBar(_ app: DashboardAppBreakdown, width: CGFloat) -> some View {
+        let totalChars = chars(app.totalKeystrokes)
+        let fullWidth = max(4, width * CGFloat(totalChars) / CGFloat(maxTopAppChars))
+        return HStack(spacing: 0) {
+            ForEach(app.segments) { segment in
+                Rectangle()
+                    .fill(DeviceColor.color(for: segment.deviceId, isSelf: segment.isSelf).opacity(0.55))
+                    .frame(width: max(3, fullWidth * CGFloat(segment.keystrokes) / CGFloat(app.totalKeystrokes)))
+            }
+        }
+        .frame(width: fullWidth, height: 6, alignment: .leading)
+        .clipShape(Capsule())
+    }
+
+    private var deviceLegend: some View {
+        let segments = legendSegments
+        return Group {
+            if segments.count > 1 {
+                HStack(spacing: 10) {
+                    ForEach(segments) { segment in
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(DeviceColor.color(for: segment.deviceId, isSelf: segment.isSelf))
+                                .frame(width: 7, height: 7)
+                            Text(segment.isSelf ? "本机" : segment.deviceName)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var legendSegments: [DeviceLegendItem] {
+        var items: [DeviceLegendItem] = []
+        var seen = Set<String>()
+
+        for segment in weekDays.flatMap(\.segments) {
+            if seen.insert(segment.deviceId).inserted {
+                items.append(DeviceLegendItem(
+                    deviceId: segment.deviceId,
+                    deviceName: segment.deviceName,
+                    isSelf: segment.isSelf
+                ))
+            }
+        }
+        for segment in todayApps.flatMap(\.segments) {
+            if seen.insert(segment.deviceId).inserted {
+                items.append(DeviceLegendItem(
+                    deviceId: segment.deviceId,
+                    deviceName: segment.deviceName,
+                    isSelf: segment.isSelf
+                ))
+            }
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
+            return lhs.deviceName < rhs.deviceName
+        }
+    }
+
     private func shortLabel(_ key: String) -> String {
         String(key.suffix(5))
     }
 
     private func reloadToday() {
         let merged = MergedStats()
-        todayApps = merged.topAppsToday(limit: 5)
+        todayApps = dashboardAppBreakdowns(from: merged.topAppsTodayByDevice(limit: 10), limit: 5)
         weekDays = merged.recentDaysByDevice(7)
     }
+
+    private func dashboardAppBreakdowns(from groups: [DeviceAppStats], limit: Int) -> [DashboardAppBreakdown] {
+        var apps: [String: (name: String, segments: [DashboardAppSegment])] = [:]
+
+        for group in groups {
+            for app in group.apps {
+                var current = apps[app.bundleId] ?? (app.appName, [])
+                current.name = app.appName
+                current.segments.append(DashboardAppSegment(
+                    bundleId: app.bundleId,
+                    deviceId: group.id,
+                    deviceName: group.deviceName,
+                    isSelf: group.isSelf,
+                    keystrokes: app.keystrokes
+                ))
+                apps[app.bundleId] = current
+            }
+        }
+
+        return apps.map { bundleId, value in
+            DashboardAppBreakdown(
+                bundleId: bundleId,
+                appName: value.name,
+                segments: value.segments.sorted { lhs, rhs in
+                    if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
+                    return lhs.deviceName < rhs.deviceName
+                }
+            )
+        }
+        .sorted { $0.totalKeystrokes > $1.totalKeystrokes }
+        .prefix(limit)
+        .map { $0 }
+    }
+}
+
+private struct DashboardAppBreakdown: Identifiable {
+    let bundleId: String
+    let appName: String
+    let segments: [DashboardAppSegment]
+
+    var id: String { bundleId }
+    var totalKeystrokes: Int { segments.reduce(0) { $0 + $1.keystrokes } }
+}
+
+private struct DashboardAppSegment: Identifiable {
+    let bundleId: String
+    let deviceId: String
+    let deviceName: String
+    let isSelf: Bool
+    let keystrokes: Int
+
+    var id: String { "\(bundleId)-\(deviceId)" }
+}
+
+private struct DeviceLegendItem: Identifiable {
+    let deviceId: String
+    let deviceName: String
+    let isSelf: Bool
+
+    var id: String { deviceId }
 }
 
 private struct FlipNumberText: View {

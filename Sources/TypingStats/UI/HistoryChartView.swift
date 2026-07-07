@@ -113,10 +113,7 @@ struct HistoryChartView: View {
     }
 
     private func segmentColor(_ segment: DeviceDayStat) -> Color {
-        if segment.isSelf { return .accentColor }
-        let palette: [Color] = [.orange, .green, .purple, .pink, .teal]
-        let value = abs(segment.deviceId.hashValue)
-        return palette[value % palette.count]
+        DeviceColor.color(for: segment.deviceId, isSelf: segment.isSelf)
     }
 
     private func tooltip(for day: DeviceDayBreakdown) -> some View {
