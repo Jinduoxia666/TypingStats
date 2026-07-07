@@ -95,8 +95,9 @@ final class ClipboardHistoryWindowController {
 
     private func resizeForContent() {
         guard let window, let state else { return }
-        let visibleCount = min(max(state.clipboardItems.count, 1), 8)
-        let height = state.clipboardItems.isEmpty ? 160 : CGFloat(visibleCount * 44 + 16)
+        let visibleCount = min(max(state.clipboardItems.count, 1), ClipboardPickerConfig.maxItems)
+        let listHeight = min(CGFloat(visibleCount) * ClipboardPickerConfig.rowHeight, ClipboardPickerConfig.maxListHeight)
+        let height = state.clipboardItems.isEmpty ? 160 : listHeight + 16
         window.setContentSize(NSSize(width: 460, height: height))
     }
 

@@ -122,6 +122,11 @@ final class AppState: ObservableObject {
         clipboardWindowController?.show()
     }
 
+    func closeClipboardHistory() {
+        clipboardWindowController?.close()
+        clipboardTargetApplication = nil
+    }
+
     func pasteClipboardItem(_ item: ClipboardHistoryItem) {
         clipboardHistory.writeToPasteboard(item)
         clipboardWindowController?.close()
@@ -143,7 +148,8 @@ final class AppState: ObservableObject {
             clipboardSelectionIndex = 0
             return
         }
-        clipboardSelectionIndex = min(max(index, 0), min(clipboardItems.count, 8) - 1)
+        let maxIndex = min(clipboardItems.count, ClipboardPickerConfig.maxItems) - 1
+        clipboardSelectionIndex = min(max(index, 0), maxIndex)
     }
 
     func moveClipboardSelection(by delta: Int) {

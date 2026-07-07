@@ -34,7 +34,7 @@ struct ClipboardQuickPickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            let visibleItems = Array(state.clipboardItems.prefix(8))
+            let visibleItems = Array(state.clipboardItems.prefix(ClipboardPickerConfig.maxItems))
             if visibleItems.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "clipboard")
@@ -48,19 +48,30 @@ struct ClipboardQuickPickerView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
-                        QuickPickerCell(
-                            index: index + 1,
-                            item: item,
-                            isSelected: state.clipboardSelectionIndex == index
-                        ) {
-                            state.pasteClipboardItem(item)
-                        }
-                        .onHover { hovering in
-                            if hovering {
-                                state.selectClipboardItem(at: index)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                                QuickPickerCell(
+                                    index: index + 1,
+                                    item: item,
+                                    isSelected: state.clipboardSelectionIndex == index
+                                ) {
+                                    state.pasteClipboardItem(item)
+                                }
+                                .id(index)
+                                .onHover { hovering in
+                                    if hovering {
+                                        state.selectClipboardItem(at: index)
+                                    }
+                                }
                             }
+                        }
+                    }
+                    .frame(height: listHeight(for: visibleItems.count))
+                    .onChange(of: state.clipboardSelectionIndex) { index in
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(index, anchor: .center)
                         }
                     }
                 }
@@ -78,7 +89,12 @@ struct ClipboardQuickPickerView: View {
 
     private var pickerHeight: CGFloat {
         if state.clipboardItems.isEmpty { return 180 }
-        return CGFloat(min(state.clipboardItems.count, 8) * 44 + 16)
+        let count = min(state.clipboardItems.count, ClipboardPickerConfig.maxItems)
+        return listHeight(for: count) + 16
+    }
+
+    private func listHeight(for count: Int) -> CGFloat {
+        min(CGFloat(count) * ClipboardPickerConfig.rowHeight, ClipboardPickerConfig.maxListHeight)
     }
 }
 
@@ -87,6 +103,9 @@ private struct QuickPickerCell: View {
     let item: ClipboardHistoryItem
     let isSelected: Bool
     let onSelect: () -> Void
+    @State private var showsPreview = false
+    @State private var previewOpenWorkItem: DispatchWorkItem?
+    @State private var previewCloseWorkItem: DispatchWorkItem?
 
     var body: some View {
         Button(action: onSelect) {
@@ -100,23 +119,78 @@ private struct QuickPickerCell: View {
                 itemPreview
 
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .foregroundStyle(isSelected ? .white : .primary)
-            .padding(.horizontal, 14)
-            .frame(height: 44)
+            .padding(.horizontal, 12)
+            .frame(height: ClipboardPickerConfig.rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isSelected ? Color.accentColor : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                schedulePreviewOpen()
+            } else {
+                cancelPreviewOpen()
+                schedulePreviewClose()
+            }
+        }
+        .popover(isPresented: $showsPreview, arrowEdge: .trailing) {
+            ClipboardHoverPreview(
+                item: item,
+                onHoverChanged: { hovering in
+                    if hovering {
+                        showPreview()
+                    } else {
+                        schedulePreviewClose()
+                    }
+                }
+            )
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.secondary.opacity(0.16))
                 .frame(height: 1)
         }
+    }
+
+    private func showPreview() {
+        cancelPreviewOpen()
+        previewCloseWorkItem?.cancel()
+        previewCloseWorkItem = nil
+        showsPreview = true
+    }
+
+    private func schedulePreviewOpen() {
+        previewCloseWorkItem?.cancel()
+        previewCloseWorkItem = nil
+        previewOpenWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
+            showsPreview = true
+            previewOpenWorkItem = nil
+        }
+        previewOpenWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    private func cancelPreviewOpen() {
+        previewOpenWorkItem?.cancel()
+        previewOpenWorkItem = nil
+    }
+
+    private func schedulePreviewClose() {
+        cancelPreviewOpen()
+        previewCloseWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
+            showsPreview = false
+            previewCloseWorkItem = nil
+        }
+        previewCloseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
     }
 
     private var title: String {
@@ -133,23 +207,57 @@ private struct QuickPickerCell: View {
         switch item.kind {
         case .text:
             Image(systemName: "doc.text")
-                .font(.system(size: 24, weight: .regular))
-                .frame(width: 30, height: 30)
+                .font(.system(size: 20, weight: .regular))
+                .frame(width: 28, height: 28)
         case .image:
             if let data = item.imagePNGData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 34, height: 30)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(width: 30, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: 5)
                             .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
                     )
             } else {
                 Image(systemName: "photo")
-                    .font(.system(size: 20, weight: .regular))
-                    .frame(width: 30, height: 30)
+                    .font(.system(size: 18, weight: .regular))
+                    .frame(width: 28, height: 28)
+            }
+        }
+    }
+}
+
+private struct ClipboardHoverPreview: View {
+    let item: ClipboardHistoryItem
+    let onHoverChanged: (Bool) -> Void
+
+    var body: some View {
+        switch item.kind {
+        case .text:
+            ScrollView {
+                Text(item.previewTitle)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+            }
+            .frame(width: 360, height: 260)
+            .onHover(perform: onHoverChanged)
+        case .image:
+            if let data = item.imagePNGData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 360, height: 260)
+                    .padding(10)
+                    .onHover(perform: onHoverChanged)
+            } else {
+                Text("图片不可预览")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 220, height: 120)
+                    .onHover(perform: onHoverChanged)
             }
         }
     }
