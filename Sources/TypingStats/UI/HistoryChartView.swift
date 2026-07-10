@@ -5,6 +5,8 @@ struct HistoryChartView: View {
     @State private var days: [DeviceDayBreakdown] = []
     @State private var range = 7
     @State private var selectedDate: String?
+    @State private var isReloading = false
+    @State private var pendingRange: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -159,12 +161,30 @@ struct HistoryChartView: View {
     }
 
     private func reload() {
-        let range = range
+        let requestedRange = range
+        guard !isReloading else {
+            pendingRange = requestedRange
+            return
+        }
+        startReload(range: requestedRange)
+    }
+
+    private func startReload(range requestedRange: Int) {
+        isReloading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = MergedStats().recentDaysByDevice(range)
+            let result = MergedStats().recentDaysByDevice(requestedRange)
             DispatchQueue.main.async {
-                days = result
-                selectedDate = nil
+                if range == requestedRange {
+                    days = result
+                    selectedDate = nil
+                }
+                isReloading = false
+                if let nextRange = pendingRange {
+                    pendingRange = nil
+                    if nextRange != requestedRange || range != requestedRange {
+                        startReload(range: nextRange)
+                    }
+                }
             }
         }
     }

@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 /// Query layer above DatabaseManager — UI talks to this.
-struct StatsService {
+struct StatsService: Sendable {
     let db: DatabaseManager
 
     init(db: DatabaseManager = .shared) {
@@ -135,48 +135,57 @@ struct StatsService {
 /// Coalesces per-keystroke writes on a background queue: keystrokes are tallied
 /// in memory and flushed to SQLite every couple of seconds, so fast typing never
 /// turns into a storm of tiny transactions. Order is irrelevant (commutative).
+@MainActor
 final class KeystrokeRecorder {
     private let service: StatsService
-    private let queue = DispatchQueue(label: "com.jinduoxia.TypingStats.dbwrite", qos: .utility)
+    private let writeQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.dbwrite", qos: .utility)
     private let flushInterval: TimeInterval = 2.0
 
     private var pendingTotal = 0
     private var pendingApps: [String: (name: String, count: Int)] = [:]
-    private var flushScheduled = false
+    private var flushTask: Task<Void, Never>?
 
     init(service: StatsService = StatsService()) {
         self.service = service
     }
 
     func record(app: FrontmostApp?) {
-        queue.async {
-            self.pendingTotal += 1
-            if let app {
-                let prev = self.pendingApps[app.bundleId]?.count ?? 0
-                self.pendingApps[app.bundleId] = (app.name, prev + 1)
-            }
-            self.scheduleFlush()
+        pendingTotal += 1
+        if let app {
+            let prev = pendingApps[app.bundleId]?.count ?? 0
+            pendingApps[app.bundleId] = (app.name, prev + 1)
         }
+        scheduleFlush()
     }
 
     /// Force any buffered keystrokes to disk now (e.g. before the app quits).
     func flushNow() {
-        queue.async { self.flush() }
+        flushTask?.cancel()
+        flushTask = nil
+        flush()
     }
 
     private func scheduleFlush() {
-        guard !flushScheduled else { return }
-        flushScheduled = true
-        queue.asyncAfter(deadline: .now() + flushInterval) { self.flush() }
+        guard flushTask == nil else { return }
+        let delay = UInt64(flushInterval * 1_000_000_000)
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
     }
 
     private func flush() {
-        flushScheduled = false
+        flushTask = nil
         let total = pendingTotal
         let apps = pendingApps
+        let date = Date()
         pendingTotal = 0
         pendingApps = [:]
         guard total > 0 else { return }
-        try? service.recordKeystrokes(total: total, apps: apps)
+        let service = self.service
+        writeQueue.async {
+            try? service.recordKeystrokes(total: total, apps: apps, date: date)
+        }
     }
 }

@@ -7,6 +7,8 @@ struct DashboardView: View {
     /// Keystroke counts at the last reload, so the periodic refresh can skip
     /// passes where nothing changed.
     @State private var lastReloadedCounts: (local: Int, others: Int) = (-1, -1)
+    @State private var isReloadingToday = false
+    @State private var needsTodayReload = false
     /// Merged stats reads snapshot files off disk; refresh them on a slow tick
     /// instead of per keystroke (the headline number is live via `state`).
     private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
@@ -210,11 +212,15 @@ struct DashboardView: View {
     }
 
     private var todayDateText: String {
+        Self.todayDateFormatter.string(from: Date())
+    }
+
+    private static let todayDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 EEEE"
-        return formatter.string(from: Date())
-    }
+        return formatter
+    }()
 
     private func barHeight(for day: DeviceDayBreakdown) -> CGFloat {
         let value = chars(day.totalKeystrokes)
@@ -310,6 +316,11 @@ struct DashboardView: View {
     }
 
     private func reloadToday() {
+        guard !isReloadingToday else {
+            needsTodayReload = true
+            return
+        }
+        isReloadingToday = true
         lastReloadedCounts = (state.todayKeystrokes, state.otherDevicesTodayKeystrokes)
         DispatchQueue.global(qos: .userInitiated).async {
             let merged = MergedStats()
@@ -318,6 +329,11 @@ struct DashboardView: View {
             DispatchQueue.main.async {
                 todayApps = apps
                 weekDays = days
+                isReloadingToday = false
+                if needsTodayReload {
+                    needsTodayReload = false
+                    reloadToday()
+                }
             }
         }
     }

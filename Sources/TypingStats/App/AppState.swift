@@ -79,6 +79,8 @@ final class AppState: ObservableObject {
     private let clipboardHistory = ClipboardHistoryStore()
     private var currentDateKey = StatsService.dateKey(for: Date())
     private var nextRolloverDate = AppState.nextMidnight(after: Date())
+    private var exactTodayKeystrokes = 0
+    private var countPublishTask: Task<Void, Never>?
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
     private var writeTimer: Timer?
@@ -129,7 +131,9 @@ final class AppState: ObservableObject {
         }
 
         // Restore today's persisted total so the menu bar survives restarts.
-        todayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+        let restoredTodayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+        exactTodayKeystrokes = restoredTodayKeystrokes
+        todayKeystrokes = restoredTodayKeystrokes
         // Property observers don't fire during init; seed the label explicitly.
         refreshMenuBarLabel()
 
@@ -151,6 +155,9 @@ final class AppState: ObservableObject {
     func stop() {
         monitor.stop()
         clipboardHistory.stop()
+        countPublishTask?.cancel()
+        countPublishTask = nil
+        publishExactTodayKeystrokes()
         recorder.flushNow()
         let cloud = self.cloud
         syncQueue.async { cloud.writeOwnSnapshot() }
@@ -472,8 +479,24 @@ final class AppState: ObservableObject {
     private func handleKeystroke(_ frontApp: FrontmostApp?) {
         rolloverIfNeeded()
         if let id = frontApp?.bundleId, excludedBundleIds.contains(id) { return }
-        todayKeystrokes += 1
+        exactTodayKeystrokes += 1
+        scheduleCountPublication()
         recorder.record(app: frontApp)
+    }
+
+    private func scheduleCountPublication() {
+        guard countPublishTask == nil else { return }
+        countPublishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            self?.publishExactTodayKeystrokes()
+        }
+    }
+
+    private func publishExactTodayKeystrokes() {
+        countPublishTask = nil
+        guard todayKeystrokes != exactTodayKeystrokes else { return }
+        todayKeystrokes = exactTodayKeystrokes
     }
 
     private static func sendCommandV() {
@@ -494,7 +517,10 @@ final class AppState: ObservableObject {
         guard Date() >= nextRolloverDate else { return }
         nextRolloverDate = Self.nextMidnight(after: Date())
         currentDateKey = StatsService.dateKey(for: Date())
-        todayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+        countPublishTask?.cancel()
+        countPublishTask = nil
+        exactTodayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+        todayKeystrokes = exactTodayKeystrokes
     }
 
     private static func nextMidnight(after date: Date) -> Date {

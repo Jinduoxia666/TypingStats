@@ -2,6 +2,9 @@ import AppKit
 import Foundation
 import CryptoKit
 import ImageIO
+import os.log
+
+private let clipboardLogger = Logger(subsystem: "com.jinduoxia.TypingStats", category: "clipboard")
 
 @MainActor
 final class ClipboardHistoryStore: ObservableObject {
@@ -9,6 +12,7 @@ final class ClipboardHistoryStore: ObservableObject {
 
     private let pasteboard: NSPasteboard
     private let maxItems = 50
+    private let maxTextBytes = 2 * 1_024 * 1_024
     private var timer: Timer?
     private var lastChangeCount: Int
     private let storageURL: URL
@@ -16,6 +20,13 @@ final class ClipboardHistoryStore: ObservableObject {
     /// Image capture (TIFF→PNG conversion, hashing, thumbnailing, file writes)
     /// runs here so a big screenshot never stalls the main thread.
     private let processingQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.clipboard", qos: .utility)
+    private enum ImagePayload {
+        case png(Data)
+        case tiff(Data)
+    }
+    private var isProcessingImage = false
+    private var pendingImage: ImagePayload?
+    private var imageProcessingGeneration = 0
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -43,6 +54,8 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     func clear() {
+        imageProcessingGeneration += 1
+        pendingImage = nil
         let files = items.compactMap(\.imageFileName)
         let dir = imagesDirectory
         processingQueue.async {
@@ -75,6 +88,11 @@ final class ClipboardHistoryStore: ObservableObject {
         lastChangeCount = pasteboard.changeCount
 
         if let string = pasteboard.string(forType: .string) {
+            let textBytes = string.utf8.count
+            guard textBytes <= maxTextBytes else {
+                clipboardLogger.notice("Clipboard text skipped: \(textBytes, privacy: .public) bytes exceeds history limit")
+                return
+            }
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
             add(ClipboardHistoryItem(
@@ -91,37 +109,76 @@ final class ClipboardHistoryStore: ObservableObject {
 
         // Grab the raw pasteboard bytes on the main thread (NSPasteboard isn't
         // thread-safe), then do all the heavy work in the background.
-        let pngData = pasteboard.data(forType: .png)
-        let tiffData = pngData == nil ? pasteboard.data(forType: .tiff) : nil
-        guard pngData != nil || tiffData != nil else { return }
-
-        let dir = imagesDirectory
-        processingQueue.async { [weak self] in
-            let png: Data
-            if let pngData {
-                png = pngData
-            } else if let tiffData,
-                      let rep = NSBitmapImageRep(data: tiffData),
-                      let converted = rep.representation(using: .png, properties: [:]) {
-                png = converted
-            } else {
-                return
-            }
-
-            let id = UUID()
-            let fileName = "\(id.uuidString).png"
-            try? png.write(to: dir.appendingPathComponent(fileName), options: .atomic)
-            let item = ClipboardHistoryItem(
-                id: id,
-                kind: .image,
-                createdAt: Date(),
-                text: nil,
-                imageFileName: fileName,
-                thumbnailJPEGData: clipboardThumbnailJPEG(from: png),
-                contentHash: clipboardContentHash(png)
-            )
-            Task { @MainActor in self?.add(item) }
+        if let pngData = pasteboard.data(forType: .png) {
+            enqueueImage(.png(pngData))
+        } else if let tiffData = pasteboard.data(forType: .tiff) {
+            enqueueImage(.tiff(tiffData))
         }
+    }
+
+    private func enqueueImage(_ payload: ImagePayload) {
+        guard !isProcessingImage else {
+            // Keep only the latest waiting image, so repeated large screenshots
+            // cannot build an unbounded queue of captured Data values.
+            pendingImage = payload
+            return
+        }
+        processImage(payload)
+    }
+
+    private func processImage(_ payload: ImagePayload) {
+        isProcessingImage = true
+        let dir = imagesDirectory
+        let generation = imageProcessingGeneration
+        processingQueue.async {
+            let item: ClipboardHistoryItem? = autoreleasepool {
+                let png: Data
+                switch payload {
+                case .png(let data):
+                    png = data
+                case .tiff(let data):
+                    guard let rep = NSBitmapImageRep(data: data),
+                          let converted = rep.representation(using: .png, properties: [:]) else {
+                        return nil
+                    }
+                    png = converted
+                }
+
+                let id = UUID()
+                let fileName = "\(id.uuidString).png"
+                do {
+                    try png.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+                } catch {
+                    return nil
+                }
+                return ClipboardHistoryItem(
+                    id: id,
+                    kind: .image,
+                    createdAt: Date(),
+                    text: nil,
+                    imageFileName: fileName,
+                    thumbnailJPEGData: clipboardThumbnailJPEG(from: png),
+                    contentHash: clipboardContentHash(png)
+                )
+            }
+            Task { @MainActor [weak self] in
+                self?.finishImageProcessing(item, generation: generation)
+            }
+        }
+    }
+
+    private func finishImageProcessing(_ item: ClipboardHistoryItem?, generation: Int) {
+        if let item {
+            if generation == imageProcessingGeneration {
+                add(item)
+            } else {
+                deleteImageFile(of: item)
+            }
+        }
+        isProcessingImage = false
+        guard let next = pendingImage else { return }
+        pendingImage = nil
+        processImage(next)
     }
 
     private func add(_ item: ClipboardHistoryItem) {

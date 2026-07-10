@@ -81,6 +81,7 @@ final class CloudSyncStore: @unchecked Sendable {
     }
     private static var snapshotCache: [String: CachedSnapshot] = [:]
     private static let cacheLock = NSLock()
+    private static let maxCachedSnapshotCount = 16
 
     /// The shared folder, or nil when iCloud Drive is turned off.
     var folder: URL? {
@@ -142,9 +143,22 @@ final class CloudSyncStore: @unchecked Sendable {
     /// All snapshots except this device's. Triggers download of any not-yet-local
     /// iCloud placeholders so they're readable on the next pass.
     func otherSnapshots() -> [DeviceSnapshot] {
-        guard let folder,
-              let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
-        else { return [] }
+        guard let folder else {
+            Self.pruneSnapshotCache(validPaths: [])
+            return []
+        }
+        guard let items = try? fm.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return [] }
+
+        let ownFileName = "\(DeviceIdentity.id).json"
+        let snapshotFiles = items.filter {
+            $0.pathExtension == "json"
+                && !$0.lastPathComponent.hasPrefix(".")
+                && $0.lastPathComponent != ownFileName
+        }
+        Self.pruneSnapshotCache(validPaths: Set(snapshotFiles.map(\.path)))
 
         var result: [DeviceSnapshot] = []
         for item in items {
@@ -154,6 +168,7 @@ final class CloudSyncStore: @unchecked Sendable {
                 continue
             }
             guard item.pathExtension == "json" else { continue }
+            guard item.lastPathComponent != ownFileName else { continue }
 
             let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
@@ -189,5 +204,15 @@ final class CloudSyncStore: @unchecked Sendable {
         cacheLock.lock()
         defer { cacheLock.unlock() }
         snapshotCache[path] = CachedSnapshot(modified: modified, snapshot: snapshot)
+        if snapshotCache.count > maxCachedSnapshotCount,
+           let oldestPath = snapshotCache.min(by: { $0.value.modified < $1.value.modified })?.key {
+            snapshotCache.removeValue(forKey: oldestPath)
+        }
+    }
+
+    private static func pruneSnapshotCache(validPaths: Set<String>) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        snapshotCache = snapshotCache.filter { validPaths.contains($0.key) }
     }
 }

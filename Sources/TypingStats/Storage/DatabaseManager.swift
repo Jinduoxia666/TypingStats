@@ -3,7 +3,9 @@ import GRDB
 
 /// Owns the SQLite database connection pool and runs migrations on init.
 /// Stored under Application Support / TypingStats / typingstats.sqlite.
-final class DatabaseManager {
+/// GRDB's DatabaseQueue serializes its connection access and is safe to share
+/// with the recorder's background write queue.
+final class DatabaseManager: @unchecked Sendable {
     static let shared = try! DatabaseManager()
 
     let dbQueue: DatabaseQueue
