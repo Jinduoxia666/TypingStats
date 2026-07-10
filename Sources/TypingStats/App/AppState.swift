@@ -5,17 +5,26 @@ import AppKit
 
 @MainActor
 final class AppState: ObservableObject {
-    @Published private(set) var todayKeystrokes: Int = 0
-    @Published private(set) var permissionStatus: PermissionStatus = .unknown
+    @Published private(set) var todayKeystrokes: Int = 0 {
+        didSet { refreshMenuBarLabel() }
+    }
+    @Published private(set) var permissionStatus: PermissionStatus = .unknown {
+        didSet { refreshMenuBarLabel() }
+    }
     @Published private(set) var excludedBundleIds: Set<String> {
         didSet { UserDefaults.standard.set(Array(excludedBundleIds), forKey: Keys.excluded) }
     }
     /// Average keystrokes per character; `字数 = keystrokes / this`.
     @Published var keystrokesPerCharacter: Double {
-        didSet { UserDefaults.standard.set(keystrokesPerCharacter, forKey: CharEstimate.factorKey) }
+        didSet {
+            UserDefaults.standard.set(keystrokesPerCharacter, forKey: CharEstimate.factorKey)
+            refreshMenuBarLabel()
+        }
     }
     /// Today's keystrokes contributed by the user's OTHER Macs (via iCloud sync).
-    @Published private(set) var otherDevicesTodayKeystrokes: Int = 0
+    @Published private(set) var otherDevicesTodayKeystrokes: Int = 0 {
+        didSet { refreshMenuBarLabel() }
+    }
     @Published private(set) var syncAvailable: Bool = false
     @Published private(set) var syncedDevices: [SyncedDeviceInfo] = []
     @Published private(set) var cpuTemperatureCelsius: Double?
@@ -55,6 +64,10 @@ final class AppState: ObservableObject {
         static let timestampShortcutModifiers = "timestampShortcutModifiers"
     }
 
+    /// Drives the always-visible menu-bar label; see MenuBarLabelModel for why
+    /// it's separate from this (chatty) object.
+    let menuBarLabel = MenuBarLabelModel()
+
     private let monitor: KeystrokeMonitor
     private let database: DatabaseManager
     private let permissions: PermissionsManager
@@ -65,6 +78,7 @@ final class AppState: ObservableObject {
     private let memoryStatsReader = MemoryStatsReader()
     private let clipboardHistory = ClipboardHistoryStore()
     private var currentDateKey = StatsService.dateKey(for: Date())
+    private var nextRolloverDate = AppState.nextMidnight(after: Date())
     private var permissionTimer: Timer?
     private var syncTimer: Timer?
     private var writeTimer: Timer?
@@ -116,6 +130,8 @@ final class AppState: ObservableObject {
 
         // Restore today's persisted total so the menu bar survives restarts.
         todayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+        // Property observers don't fire during init; seed the label explicitly.
+        refreshMenuBarLabel()
 
         refreshPermissions()
         startPermissionWatcher()
@@ -375,6 +391,14 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func refreshMenuBarLabel() {
+        let chars = CharEstimate.characters(fromKeystrokes: todayKeystrokesMerged, factor: keystrokesPerCharacter)
+        menuBarLabel.update(
+            text: MenuBarLabelModel.compact(chars),
+            showsWarning: permissionStatus != .granted
+        )
+    }
+
     func refreshPermissions() {
         let new = permissions.currentStatus()
         guard new != permissionStatus else { return }
@@ -464,10 +488,18 @@ final class AppState: ObservableObject {
 
     /// When the local day flips while the app is running, reset the in-memory
     /// "today" total (reloaded from the DB, which is ~empty for the new day).
+    /// Compares against a cached midnight so the per-keystroke check is a plain
+    /// Date comparison, not a date-format round trip.
     private func rolloverIfNeeded() {
-        let key = StatsService.dateKey(for: Date())
-        guard key != currentDateKey else { return }
-        currentDateKey = key
+        guard Date() >= nextRolloverDate else { return }
+        nextRolloverDate = Self.nextMidnight(after: Date())
+        currentDateKey = StatsService.dateKey(for: Date())
         todayKeystrokes = (try? stats.todayStats())?.keystrokes ?? 0
+    }
+
+    private static func nextMidnight(after date: Date) -> Date {
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: date) ?? date.addingTimeInterval(86_400)
+        return cal.startOfDay(for: tomorrow)
     }
 }

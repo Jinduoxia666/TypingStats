@@ -31,6 +31,17 @@ struct ClipboardHistoryView: View {
 
 struct ClipboardQuickPickerView: View {
     @EnvironmentObject private var state: AppState
+    /// Set when a selection change comes from mouse hover: hover selection must
+    /// only highlight the row — auto-scrolling (`scrollTo(.center)`) here would
+    /// make the list slide around under the pointer. Keyboard moves still scroll.
+    @State private var suppressNextAutoScroll = false
+    /// Single source of truth for the hover preview: at most one row shows a
+    /// popover. Per-cell preview state caused double-pops — moving between rows
+    /// opened the new popover before the old one's delayed close fired, and a
+    /// hover bounce on the presenting row closed-then-reopened its own popover.
+    @State private var previewIndex: Int?
+    @State private var previewOpenWorkItem: DispatchWorkItem?
+    @State private var previewCloseWorkItem: DispatchWorkItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,21 +66,28 @@ struct ClipboardQuickPickerView: View {
                                 QuickPickerCell(
                                     index: index + 1,
                                     item: item,
-                                    isSelected: state.clipboardSelectionIndex == index
-                                ) {
-                                    state.pasteClipboardItem(item)
-                                }
+                                    isSelected: state.clipboardSelectionIndex == index,
+                                    isPreviewPresented: previewBinding(for: index),
+                                    onSelect: { state.pasteClipboardItem(item) },
+                                    onPreviewHover: handlePreviewHover
+                                )
                                 .id(index)
                                 .onHover { hovering in
-                                    if hovering {
+                                    if hovering, state.clipboardSelectionIndex != index {
+                                        suppressNextAutoScroll = true
                                         state.selectClipboardItem(at: index)
                                     }
+                                    handleRowHover(hovering, index: index)
                                 }
                             }
                         }
                     }
                     .frame(height: listHeight(for: visibleItems.count))
                     .onChange(of: state.clipboardSelectionIndex) { index in
+                        if suppressNextAutoScroll {
+                            suppressNextAutoScroll = false
+                            return
+                        }
                         withAnimation(.easeOut(duration: 0.12)) {
                             proxy.scrollTo(index, anchor: .center)
                         }
@@ -93,19 +111,75 @@ struct ClipboardQuickPickerView: View {
         return listHeight(for: count) + 16
     }
 
+    // MARK: - Hover preview coordination
+
+    private func previewBinding(for index: Int) -> Binding<Bool> {
+        Binding(
+            get: { previewIndex == index },
+            set: { shown in
+                if !shown && previewIndex == index { previewIndex = nil }
+            }
+        )
+    }
+
+    private func handleRowHover(_ hovering: Bool, index: Int) {
+        if hovering {
+            previewCloseWorkItem?.cancel()
+            previewCloseWorkItem = nil
+            // Already showing this row's preview (e.g. a hover bounce as the
+            // popover appears): don't close-and-reopen it.
+            guard previewIndex != index else { return }
+            // One shared pending-open: hovering a new row cancels the old
+            // row's not-yet-fired open, so a stale popover can't appear late.
+            previewOpenWorkItem?.cancel()
+            let workItem = DispatchWorkItem {
+                previewIndex = index
+                previewOpenWorkItem = nil
+            }
+            previewOpenWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+        } else {
+            previewOpenWorkItem?.cancel()
+            previewOpenWorkItem = nil
+            schedulePreviewClose()
+        }
+    }
+
+    private func handlePreviewHover(_ hovering: Bool) {
+        if hovering {
+            previewCloseWorkItem?.cancel()
+            previewCloseWorkItem = nil
+        } else {
+            schedulePreviewClose()
+        }
+    }
+
+    private func schedulePreviewClose() {
+        guard previewIndex != nil else { return }
+        previewCloseWorkItem?.cancel()
+        let workItem = DispatchWorkItem {
+            previewIndex = nil
+            previewCloseWorkItem = nil
+        }
+        previewCloseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    }
+
     private func listHeight(for count: Int) -> CGFloat {
         min(CGFloat(count) * ClipboardPickerConfig.rowHeight, ClipboardPickerConfig.maxListHeight)
     }
 }
 
+/// A row in the quick picker. Preview presentation is owned by the parent
+/// (single popover across the list); the cell just renders and reports hover
+/// over its popover content.
 private struct QuickPickerCell: View {
     let index: Int
     let item: ClipboardHistoryItem
     let isSelected: Bool
+    @Binding var isPreviewPresented: Bool
     let onSelect: () -> Void
-    @State private var showsPreview = false
-    @State private var previewOpenWorkItem: DispatchWorkItem?
-    @State private var previewCloseWorkItem: DispatchWorkItem?
+    let onPreviewHover: (Bool) -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -131,66 +205,14 @@ private struct QuickPickerCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            if hovering {
-                schedulePreviewOpen()
-            } else {
-                cancelPreviewOpen()
-                schedulePreviewClose()
-            }
-        }
-        .popover(isPresented: $showsPreview, arrowEdge: .trailing) {
-            ClipboardHoverPreview(
-                item: item,
-                onHoverChanged: { hovering in
-                    if hovering {
-                        showPreview()
-                    } else {
-                        schedulePreviewClose()
-                    }
-                }
-            )
+        .popover(isPresented: $isPreviewPresented, arrowEdge: .trailing) {
+            ClipboardHoverPreview(item: item, onHoverChanged: onPreviewHover)
         }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.secondary.opacity(0.16))
                 .frame(height: 1)
         }
-    }
-
-    private func showPreview() {
-        cancelPreviewOpen()
-        previewCloseWorkItem?.cancel()
-        previewCloseWorkItem = nil
-        showsPreview = true
-    }
-
-    private func schedulePreviewOpen() {
-        previewCloseWorkItem?.cancel()
-        previewCloseWorkItem = nil
-        previewOpenWorkItem?.cancel()
-        let workItem = DispatchWorkItem {
-            showsPreview = true
-            previewOpenWorkItem = nil
-        }
-        previewOpenWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
-    }
-
-    private func cancelPreviewOpen() {
-        previewOpenWorkItem?.cancel()
-        previewOpenWorkItem = nil
-    }
-
-    private func schedulePreviewClose() {
-        cancelPreviewOpen()
-        previewCloseWorkItem?.cancel()
-        let workItem = DispatchWorkItem {
-            showsPreview = false
-            previewCloseWorkItem = nil
-        }
-        previewCloseWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
     }
 
     private var title: String {
@@ -210,7 +232,7 @@ private struct QuickPickerCell: View {
                 .font(.system(size: 20, weight: .regular))
                 .frame(width: 28, height: 28)
         case .image:
-            if let data = item.imagePNGData, let image = NSImage(data: data) {
+            if let data = item.thumbnailJPEGData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -246,7 +268,7 @@ private struct ClipboardHoverPreview: View {
             .frame(width: 360, height: 260)
             .onHover(perform: onHoverChanged)
         case .image:
-            if let data = item.imagePNGData, let image = NSImage(data: data) {
+            if let data = item.thumbnailJPEGData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -338,7 +360,7 @@ private struct ClipboardHistoryRow: View {
                 .background(.quaternary.opacity(0.45))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         case .image:
-            if let data = item.imagePNGData, let image = NSImage(data: data) {
+            if let data = item.thumbnailJPEGData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -419,7 +441,7 @@ private struct ClipboardDetailView: View {
             .background(.quaternary.opacity(0.35))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         case .image:
-            if let data = item.imagePNGData, let image = NSImage(data: data) {
+            if let data = item.thumbnailJPEGData, let image = NSImage(data: data) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()

@@ -10,7 +10,7 @@ settings:
     # Manual signing with the local Apple Development cert → stable designated
     # requirement, so the Accessibility (TCC) grant survives rebuilds. No
     # provisioning profile needed for a local-only, non-distributed dev app.
-    DEVELOPMENT_TEAM: 4UGDKL43ZA
+    DEVELOPMENT_TEAM: UTV4ZA945V
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Apple Development"
     PROVISIONING_PROFILE_SPECIFIER: ""

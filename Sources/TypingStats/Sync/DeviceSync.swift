@@ -61,8 +61,26 @@ struct SyncedDeviceInfo: Identifiable {
 final class CloudSyncStore: @unchecked Sendable {
     static let folderName = "TypingStats"
 
+    /// Snapshots carry only this many recent days, so their size (and the cost
+    /// of encoding/decoding them every sync pass) stays bounded no matter how
+    /// long the app has been collecting history. Older days remain in each
+    /// device's local DB; only the cross-device merged view is limited.
+    static let syncedDayCount = 365
+
     private let fm = FileManager.default
     private let stats = StatsService()
+
+    /// Decoded snapshots keyed by file path, reused until the file's
+    /// modification date changes — CloudSyncStore instances are created per
+    /// refresh, so the cache is shared. Other devices rewrite their file every
+    /// ~5 minutes while we re-read every 20 seconds; without this, each pass
+    /// re-decodes every device's full snapshot.
+    private struct CachedSnapshot {
+        let modified: Date
+        let snapshot: DeviceSnapshot
+    }
+    private static var snapshotCache: [String: CachedSnapshot] = [:]
+    private static let cacheLock = NSLock()
 
     /// The shared folder, or nil when iCloud Drive is turned off.
     var folder: URL? {
@@ -98,13 +116,18 @@ final class CloudSyncStore: @unchecked Sendable {
     }
 
     private func buildOwnSnapshot() -> DeviceSnapshot? {
-        guard let days = try? stats.allDays() else { return nil }
+        let cal = Calendar(identifier: .gregorian)
+        let cutoffDate = cal.date(byAdding: .day, value: -(Self.syncedDayCount - 1), to: Date()) ?? Date()
+        let cutoff = StatsService.dateKey(for: cutoffDate)
+        guard let history = try? stats.history(sinceKey: cutoff) else { return nil }
+
         var out: [String: DaySnapshot] = [:]
-        for day in days {
-            let apps = (try? stats.allApps(onKey: day.date)) ?? []
-            var appMap: [String: AppSnapshot] = [:]
-            for a in apps { appMap[a.bundleId] = AppSnapshot(name: a.appName, keystrokes: a.keystrokes) }
-            out[day.date] = DaySnapshot(keystrokes: day.keystrokes, apps: appMap)
+        for day in history.days {
+            out[day.date] = DaySnapshot(keystrokes: day.keystrokes, apps: [:])
+        }
+        for a in history.apps {
+            out[a.date, default: DaySnapshot(keystrokes: 0, apps: [:])]
+                .apps[a.bundleId] = AppSnapshot(name: a.appName, keystrokes: a.keystrokes)
         }
         return DeviceSnapshot(
             deviceId: DeviceIdentity.id,
@@ -120,7 +143,7 @@ final class CloudSyncStore: @unchecked Sendable {
     /// iCloud placeholders so they're readable on the next pass.
     func otherSnapshots() -> [DeviceSnapshot] {
         guard let folder,
-              let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+              let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
         else { return [] }
 
         var result: [DeviceSnapshot] = []
@@ -132,15 +155,39 @@ final class CloudSyncStore: @unchecked Sendable {
             }
             guard item.pathExtension == "json" else { continue }
 
-            var data: Data?
-            var coordError: NSError?
-            NSFileCoordinator().coordinate(readingItemAt: item, options: [], error: &coordError) { u in
-                data = try? Data(contentsOf: u)
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let snap: DeviceSnapshot
+            if let cached = Self.cachedSnapshot(path: item.path, modified: modified) {
+                snap = cached
+            } else {
+                var data: Data?
+                var coordError: NSError?
+                NSFileCoordinator().coordinate(readingItemAt: item, options: [], error: &coordError) { u in
+                    data = try? Data(contentsOf: u)
+                }
+                guard let data, let decoded = try? JSONDecoder().decode(DeviceSnapshot.self, from: data) else { continue }
+                Self.storeSnapshot(decoded, path: item.path, modified: modified)
+                snap = decoded
             }
-            guard let data, let snap = try? JSONDecoder().decode(DeviceSnapshot.self, from: data) else { continue }
             if snap.deviceId == DeviceIdentity.id { continue }   // our own file: use the live DB instead
             result.append(snap)
         }
         return result
+    }
+
+    private static func cachedSnapshot(path: String, modified: Date) -> DeviceSnapshot? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cached = snapshotCache[path], cached.modified == modified, modified != .distantPast else {
+            return nil
+        }
+        return cached.snapshot
+    }
+
+    private static func storeSnapshot(_ snapshot: DeviceSnapshot, path: String, modified: Date) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        snapshotCache[path] = CachedSnapshot(modified: modified, snapshot: snapshot)
     }
 }

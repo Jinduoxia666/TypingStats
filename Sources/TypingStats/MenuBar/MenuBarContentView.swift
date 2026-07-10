@@ -1,22 +1,24 @@
 import SwiftUI
 import AppKit
 
-struct MenuBarLabel: View {
-    @EnvironmentObject private var state: AppState
+/// Tiny dedicated model for the always-visible menu-bar label. The label must
+/// NOT observe AppState directly: AppState publishes on every keystroke (plus
+/// hardware/sync ticks), and re-rendering the MenuBarExtra label that often
+/// costs CPU and slowly grows memory. This model publishes only when the
+/// rendered text actually changes.
+@MainActor
+final class MenuBarLabelModel: ObservableObject {
+    @Published private(set) var text: String = "0"
+    @Published private(set) var showsWarning: Bool = true
 
-    var body: some View {
-        switch state.permissionStatus {
-        case .granted:
-            Text(Self.compact(CharEstimate.characters(fromKeystrokes: state.todayKeystrokesMerged, factor: state.keystrokesPerCharacter)))
-                .monospacedDigit()
-        case .denied, .unknown:
-            Image(systemName: "exclamationmark.triangle.fill")
-        }
+    func update(text: String, showsWarning: Bool) {
+        if self.text != text { self.text = text }
+        if self.showsWarning != showsWarning { self.showsWarning = showsWarning }
     }
 
     /// Keeps the always-visible menu-bar number short: at most 3 digits, using
     /// k/m/b suffixes above 999 (e.g. 999 → "999", 1200 → "1.2k", 45000 → "45k").
-    static func compact(_ n: Int) -> String {
+    nonisolated static func compact(_ n: Int) -> String {
         if n < 1000 { return "\(n)" }
         var value = Double(n)
         var unit = ""
@@ -28,6 +30,19 @@ struct MenuBarLabel: View {
         return value < 10
             ? String(format: "%.1f%@", value, unit)
             : String(format: "%.0f%@", value, unit)
+    }
+}
+
+struct MenuBarLabel: View {
+    @EnvironmentObject private var model: MenuBarLabelModel
+
+    var body: some View {
+        if model.showsWarning {
+            Image(systemName: "exclamationmark.triangle.fill")
+        } else {
+            Text(model.text)
+                .monospacedDigit()
+        }
     }
 }
 

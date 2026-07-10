@@ -32,11 +32,20 @@ struct StatsService {
         }
     }
 
-    /// All per-app rows for a given day (unlimited) — used to build the cloud
-    /// sync snapshot.
+    /// All per-app rows for a given day (unlimited).
     func allApps(onKey key: String) throws -> [AppStat] {
         try db.dbQueue.read { db in
             try AppStat.filter(Column("date") == key).fetchAll(db)
+        }
+    }
+
+    /// Daily totals and per-app rows on/after `key`, fetched in a single read —
+    /// used to build the cloud sync snapshot without a per-day query storm.
+    func history(sinceKey key: String) throws -> (days: [DailyStat], apps: [AppStat]) {
+        try db.dbQueue.read { db in
+            let days = try DailyStat.filter(Column("date") >= key).fetchAll(db)
+            let apps = try AppStat.filter(Column("date") >= key).fetchAll(db)
+            return (days, apps)
         }
     }
 
@@ -107,13 +116,19 @@ struct StatsService {
         }
     }
 
-    static func dateKey(for date: Date) -> String {
+    /// Shared formatter: DateFormatter construction is expensive (ICU init) and
+    /// this runs on hot paths. `string(from:)` is thread-safe on macOS 10.9+.
+    private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = .current
-        return f.string(from: date)
+        return f
+    }()
+
+    static func dateKey(for date: Date) -> String {
+        dayFormatter.string(from: date)
     }
 }
 

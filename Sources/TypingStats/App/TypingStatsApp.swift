@@ -11,7 +11,7 @@ struct TypingStatsApp: App {
                 .environmentObject(appState)
         } label: {
             MenuBarLabel()
-                .environmentObject(appState)
+                .environmentObject(appState.menuBarLabel)
         }
         .menuBarExtraStyle(.window)
 

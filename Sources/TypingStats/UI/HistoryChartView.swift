@@ -159,8 +159,14 @@ struct HistoryChartView: View {
     }
 
     private func reload() {
-        days = MergedStats().recentDaysByDevice(range)
-        selectedDate = nil
+        let range = range
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = MergedStats().recentDaysByDevice(range)
+            DispatchQueue.main.async {
+                days = result
+                selectedDate = nil
+            }
+        }
     }
 
     /// "2026-06-18" → "06-18"

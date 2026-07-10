@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import CryptoKit
+import ImageIO
 
 @MainActor
 final class ClipboardHistoryStore: ObservableObject {
@@ -11,6 +12,10 @@ final class ClipboardHistoryStore: ObservableObject {
     private var timer: Timer?
     private var lastChangeCount: Int
     private let storageURL: URL
+    private let imagesDirectory: URL
+    /// Image capture (TIFF→PNG conversion, hashing, thumbnailing, file writes)
+    /// runs here so a big screenshot never stalls the main thread.
+    private let processingQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.clipboard", qos: .utility)
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -20,6 +25,8 @@ final class ClipboardHistoryStore: ObservableObject {
         let dir = appSupport.appendingPathComponent("TypingStats", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.storageURL = dir.appendingPathComponent("clipboard-history.json")
+        self.imagesDirectory = dir.appendingPathComponent("ClipboardImages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         load()
     }
 
@@ -36,6 +43,13 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     func clear() {
+        let files = items.compactMap(\.imageFileName)
+        let dir = imagesDirectory
+        processingQueue.async {
+            for file in files {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+        }
         items.removeAll()
         save()
     }
@@ -47,7 +61,9 @@ final class ClipboardHistoryStore: ObservableObject {
         case .text:
             pasteboard.setString(item.text ?? "", forType: .string)
         case .image:
-            guard let data = item.imagePNGData, let image = NSImage(data: data) else { return }
+            guard let fileName = item.imageFileName,
+                  let data = try? Data(contentsOf: imagesDirectory.appendingPathComponent(fileName)),
+                  let image = NSImage(data: data) else { return }
             pasteboard.writeObjects([image])
         }
 
@@ -58,75 +74,179 @@ final class ClipboardHistoryStore: ObservableObject {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 
-        if let item = currentPasteboardItem() {
-            add(item)
-        }
-    }
-
-    private func currentPasteboardItem() -> ClipboardHistoryItem? {
         if let string = pasteboard.string(forType: .string) {
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let data = Data(string.utf8)
-            return ClipboardHistoryItem(
+            guard !trimmed.isEmpty else { return }
+            add(ClipboardHistoryItem(
                 id: UUID(),
                 kind: .text,
                 createdAt: Date(),
                 text: string,
-                imagePNGData: nil,
-                contentHash: Self.hash(data)
+                imageFileName: nil,
+                thumbnailJPEGData: nil,
+                contentHash: clipboardContentHash(Data(string.utf8))
+            ))
+            return
+        }
+
+        // Grab the raw pasteboard bytes on the main thread (NSPasteboard isn't
+        // thread-safe), then do all the heavy work in the background.
+        let pngData = pasteboard.data(forType: .png)
+        let tiffData = pngData == nil ? pasteboard.data(forType: .tiff) : nil
+        guard pngData != nil || tiffData != nil else { return }
+
+        let dir = imagesDirectory
+        processingQueue.async { [weak self] in
+            let png: Data
+            if let pngData {
+                png = pngData
+            } else if let tiffData,
+                      let rep = NSBitmapImageRep(data: tiffData),
+                      let converted = rep.representation(using: .png, properties: [:]) {
+                png = converted
+            } else {
+                return
+            }
+
+            let id = UUID()
+            let fileName = "\(id.uuidString).png"
+            try? png.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .image,
+                createdAt: Date(),
+                text: nil,
+                imageFileName: fileName,
+                thumbnailJPEGData: clipboardThumbnailJPEG(from: png),
+                contentHash: clipboardContentHash(png)
             )
+            Task { @MainActor in self?.add(item) }
         }
-
-        guard let image = NSImage(pasteboard: pasteboard),
-              let pngData = image.pngData else {
-            return nil
-        }
-
-        return ClipboardHistoryItem(
-            id: UUID(),
-            kind: .image,
-            createdAt: Date(),
-            text: nil,
-            imagePNGData: pngData,
-            contentHash: Self.hash(pngData)
-        )
     }
 
     private func add(_ item: ClipboardHistoryItem) {
-        if items.first?.contentHash == item.contentHash { return }
+        if items.first?.contentHash == item.contentHash {
+            // Re-copy of the newest entry: keep the old item, drop the new file.
+            deleteImageFile(of: item)
+            return
+        }
+        let duplicates = items.filter { $0.contentHash == item.contentHash }
         items.removeAll { $0.contentHash == item.contentHash }
+        duplicates.forEach(deleteImageFile(of:))
         items.insert(item, at: 0)
-        if items.count > maxItems {
-            items.removeLast(items.count - maxItems)
+        while items.count > maxItems {
+            deleteImageFile(of: items.removeLast())
         }
         save()
     }
 
+    private func deleteImageFile(of item: ClipboardHistoryItem) {
+        guard let fileName = item.imageFileName else { return }
+        let url = imagesDirectory.appendingPathComponent(fileName)
+        processingQueue.async {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    // MARK: - Persistence
+
+    /// On-disk shape. `imagePNGData` is the legacy (pre-file-storage) inline
+    /// image; when present it's migrated to a file on first load.
+    private struct StoredItem: Codable {
+        let id: UUID
+        let kind: ClipboardContentKind
+        let createdAt: Date
+        let text: String?
+        let imageFileName: String?
+        let thumbnailJPEGData: Data?
+        let imagePNGData: Data?
+        let contentHash: String
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: storageURL),
-              let decoded = try? JSONDecoder().decode([ClipboardHistoryItem].self, from: data) else {
+              let decoded = try? JSONDecoder().decode([StoredItem].self, from: data) else {
+            pruneOrphanImageFiles(referenced: [])
             return
         }
-        items = Array(decoded.prefix(maxItems))
+
+        var migratedLegacy = false
+        var loaded: [ClipboardHistoryItem] = []
+        for stored in decoded.prefix(maxItems) {
+            var fileName = stored.imageFileName
+            var thumbnail = stored.thumbnailJPEGData
+            if let legacyPNG = stored.imagePNGData {
+                fileName = "\(stored.id.uuidString).png"
+                try? legacyPNG.write(to: imagesDirectory.appendingPathComponent(fileName!), options: .atomic)
+                thumbnail = clipboardThumbnailJPEG(from: legacyPNG)
+                migratedLegacy = true
+            }
+            loaded.append(ClipboardHistoryItem(
+                id: stored.id,
+                kind: stored.kind,
+                createdAt: stored.createdAt,
+                text: stored.text,
+                imageFileName: fileName,
+                thumbnailJPEGData: thumbnail,
+                contentHash: stored.contentHash
+            ))
+        }
+        items = loaded
+        if migratedLegacy { save() }
+        pruneOrphanImageFiles(referenced: Set(loaded.compactMap(\.imageFileName)))
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: storageURL, options: [.atomic])
+        let stored = items.map { item in
+            StoredItem(
+                id: item.id,
+                kind: item.kind,
+                createdAt: item.createdAt,
+                text: item.text,
+                imageFileName: item.imageFileName,
+                thumbnailJPEGData: item.thumbnailJPEGData,
+                imagePNGData: nil,
+                contentHash: item.contentHash
+            )
+        }
+        guard let data = try? JSONEncoder().encode(stored) else { return }
+        let url = storageURL
+        processingQueue.async {
+            try? data.write(to: url, options: [.atomic])
+        }
     }
 
-    private static func hash(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    /// Delete image files no history item references (e.g. left behind by a
+    /// crash between the file write and the JSON save).
+    private func pruneOrphanImageFiles(referenced: Set<String>) {
+        let dir = imagesDirectory
+        processingQueue.async {
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+            for file in files where !referenced.contains(file) {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
+            }
+        }
     }
 }
 
-private extension NSImage {
-    var pngData: Data? {
-        guard let tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffRepresentation) else {
-            return nil
-        }
-        return bitmap.representation(using: .png, properties: [:])
+// MARK: - Image helpers (nonisolated: called from the processing queue)
+
+private func clipboardContentHash(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+}
+
+/// Downscaled JPEG preview via ImageIO, which decodes at thumbnail size
+/// instead of decompressing the full image first.
+private func clipboardThumbnailJPEG(from data: Data, maxPixel: Int = 640) -> Data? {
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        kCGImageSourceCreateThumbnailWithTransform: true
+    ]
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        return nil
     }
+    let rep = NSBitmapImageRep(cgImage: cgImage)
+    return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
 }

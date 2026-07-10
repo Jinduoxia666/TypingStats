@@ -89,6 +89,11 @@ struct TopAppView: View {
     }
 
     private func reload() {
-        groups = MergedStats().topAppsTodayByDevice(limit: 10)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = MergedStats().topAppsTodayByDevice(limit: 10)
+            DispatchQueue.main.async {
+                groups = result
+            }
+        }
     }
 }

@@ -4,6 +4,12 @@ struct DashboardView: View {
     @EnvironmentObject private var state: AppState
     @State private var todayApps: [DashboardAppBreakdown] = []
     @State private var weekDays: [DeviceDayBreakdown] = []
+    /// Keystroke counts at the last reload, so the periodic refresh can skip
+    /// passes where nothing changed.
+    @State private var lastReloadedCounts: (local: Int, others: Int) = (-1, -1)
+    /// Merged stats reads snapshot files off disk; refresh them on a slow tick
+    /// instead of per keystroke (the headline number is live via `state`).
+    private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
@@ -48,8 +54,11 @@ struct DashboardView: View {
         }
         .padding()
         .onAppear(perform: reloadToday)
-        .onChange(of: state.todayKeystrokes) { _ in reloadToday() }
-        .onChange(of: state.otherDevicesTodayKeystrokes) { _ in reloadToday() }
+        .onReceive(refreshTimer) { _ in
+            guard state.todayKeystrokes != lastReloadedCounts.local
+                || state.otherDevicesTodayKeystrokes != lastReloadedCounts.others else { return }
+            reloadToday()
+        }
     }
 
     private func statTile(_ title: String, _ value: String, _ icon: String) -> some View {
@@ -301,12 +310,19 @@ struct DashboardView: View {
     }
 
     private func reloadToday() {
-        let merged = MergedStats()
-        todayApps = dashboardAppBreakdowns(from: merged.topAppsTodayByDevice(limit: 10), limit: 5)
-        weekDays = merged.recentDaysByDevice(7)
+        lastReloadedCounts = (state.todayKeystrokes, state.otherDevicesTodayKeystrokes)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let merged = MergedStats()
+            let apps = Self.dashboardAppBreakdowns(from: merged.topAppsTodayByDevice(limit: 10), limit: 5)
+            let days = merged.recentDaysByDevice(7)
+            DispatchQueue.main.async {
+                todayApps = apps
+                weekDays = days
+            }
+        }
     }
 
-    private func dashboardAppBreakdowns(from groups: [DeviceAppStats], limit: Int) -> [DashboardAppBreakdown] {
+    private static func dashboardAppBreakdowns(from groups: [DeviceAppStats], limit: Int) -> [DashboardAppBreakdown] {
         var apps: [String: (name: String, segments: [DashboardAppSegment])] = [:]
 
         for group in groups {
