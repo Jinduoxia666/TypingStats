@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TimestampToolPickerView: View {
-    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var model: TimestampViewModel
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -9,11 +9,11 @@ struct TimestampToolPickerView: View {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundStyle(.secondary)
-                TextField("输入时间戳或时间字符串", text: $state.timestampInput)
+                TextField("输入时间戳或时间字符串", text: $model.input)
                     .textFieldStyle(.plain)
                     .focused($inputFocused)
-                    .onChange(of: state.timestampInput) { _ in
-                        state.selectTimestampItem(at: 0)
+                    .onChange(of: model.input) { _ in
+                        model.select(at: 0)
                     }
             }
             .padding(.horizontal, 12)
@@ -22,17 +22,17 @@ struct TimestampToolPickerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(spacing: 0) {
-                ForEach(Array(state.timestampItems.enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                     TimestampToolRow(
                         item: item,
-                        isSelected: state.timestampSelectionIndex == index
+                        isSelected: model.selectionIndex == index
                     ) {
-                        state.selectTimestampItem(at: index)
-                        state.pasteTimestampItem(item)
+                        model.select(at: index)
+                        model.paste(item)
                     }
                     .onHover { hovering in
                         if hovering {
-                            state.selectTimestampItem(at: index)
+                            model.select(at: index)
                         }
                     }
                 }

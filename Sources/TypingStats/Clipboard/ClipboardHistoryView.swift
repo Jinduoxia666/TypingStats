@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct ClipboardHistoryView: View {
-    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var model: ClipboardViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -10,19 +10,19 @@ struct ClipboardHistoryView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("剪贴板")
                         .font(.title2.bold())
-                    Text("快捷键 \(state.clipboardShortcut.displayText) 呼出历史面板")
+                    Text("快捷键 \(model.shortcut.displayText) 呼出历史面板")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("清空") {
-                    state.clearClipboardHistory()
+                    model.clear()
                 }
-                .disabled(state.clipboardItems.isEmpty)
+                .disabled(model.items.isEmpty)
             }
 
-            ClipboardHistoryList(items: state.clipboardItems) { item in
-                state.pasteClipboardItem(item)
+            ClipboardHistoryList(items: model.items) { item in
+                model.paste(item)
             }
         }
         .padding()
@@ -30,7 +30,7 @@ struct ClipboardHistoryView: View {
 }
 
 struct ClipboardQuickPickerView: View {
-    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var model: ClipboardViewModel
     /// Set when a selection change comes from mouse hover: hover selection must
     /// only highlight the row — auto-scrolling (`scrollTo(.center)`) here would
     /// make the list slide around under the pointer. Keyboard moves still scroll.
@@ -45,7 +45,7 @@ struct ClipboardQuickPickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            let visibleItems = Array(state.clipboardItems.prefix(ClipboardPickerConfig.maxItems))
+            let visibleItems = Array(model.items.prefix(ClipboardPickerConfig.maxItems))
             if visibleItems.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "clipboard")
@@ -53,7 +53,7 @@ struct ClipboardQuickPickerView: View {
                         .foregroundStyle(.secondary)
                     Text("暂无剪贴板历史")
                         .font(.headline)
-                    Text("复制文字或图片后再按 \(state.clipboardShortcut.displayText)")
+                    Text("复制文字或图片后再按 \(model.shortcut.displayText)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -66,16 +66,16 @@ struct ClipboardQuickPickerView: View {
                                 QuickPickerCell(
                                     index: index + 1,
                                     item: item,
-                                    isSelected: state.clipboardSelectionIndex == index,
+                                    isSelected: model.selectionIndex == index,
                                     isPreviewPresented: previewBinding(for: index),
-                                    onSelect: { state.pasteClipboardItem(item) },
+                                    onSelect: { model.paste(item) },
                                     onPreviewHover: handlePreviewHover
                                 )
                                 .id(index)
                                 .onHover { hovering in
-                                    if hovering, state.clipboardSelectionIndex != index {
+                                    if hovering, model.selectionIndex != index {
                                         suppressNextAutoScroll = true
-                                        state.selectClipboardItem(at: index)
+                                        model.select(at: index)
                                     }
                                     handleRowHover(hovering, index: index)
                                 }
@@ -83,7 +83,7 @@ struct ClipboardQuickPickerView: View {
                         }
                     }
                     .frame(height: listHeight(for: visibleItems.count))
-                    .onChange(of: state.clipboardSelectionIndex) { index in
+                    .onChange(of: model.selectionIndex) { index in
                         if suppressNextAutoScroll {
                             suppressNextAutoScroll = false
                             return
@@ -106,8 +106,8 @@ struct ClipboardQuickPickerView: View {
     }
 
     private var pickerHeight: CGFloat {
-        if state.clipboardItems.isEmpty { return 180 }
-        let count = min(state.clipboardItems.count, ClipboardPickerConfig.maxItems)
+        if model.items.isEmpty { return 180 }
+        let count = min(model.items.count, ClipboardPickerConfig.maxItems)
         return listHeight(for: count) + 16
     }
 

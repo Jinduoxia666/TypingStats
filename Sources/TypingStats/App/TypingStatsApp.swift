@@ -9,6 +9,7 @@ struct TypingStatsApp: App {
         MenuBarExtra {
             MenuBarContentView()
                 .environmentObject(appState)
+                .environmentObject(appState.hardwareStats)
         } label: {
             MenuBarLabel()
                 .environmentObject(appState.menuBarLabel)
@@ -17,7 +18,8 @@ struct TypingStatsApp: App {
 
         Window("TypingStats", id: "main") {
             DashboardView()
-                .environmentObject(appState)
+                .environmentObject(appState.dashboardStats)
+                .environmentObject(appState.clipboardViewModel)
                 .frame(minWidth: 720, minHeight: 480)
                 .background(
                     WindowCloseObserver {

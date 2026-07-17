@@ -40,7 +40,7 @@ struct DeviceSnapshot: Codable {
 }
 
 /// A row in the Settings → 同步 device list.
-struct SyncedDeviceInfo: Identifiable {
+struct SyncedDeviceInfo: Identifiable, Equatable {
     let id: String
     let name: String
     let updatedAt: Date

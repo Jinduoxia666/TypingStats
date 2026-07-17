@@ -33,7 +33,7 @@ final class TimestampToolWindowController {
             panel.hasShadow = true
             panel.contentView = NSHostingView(
                 rootView: TimestampToolPickerView()
-                    .environmentObject(state)
+                    .environmentObject(state.timestampViewModel)
             )
             window = panel
         }

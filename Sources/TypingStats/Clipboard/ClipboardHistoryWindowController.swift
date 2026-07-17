@@ -33,7 +33,7 @@ final class ClipboardHistoryWindowController {
             panel.hasShadow = true
             panel.contentView = NSHostingView(
                 rootView: ClipboardQuickPickerView()
-                    .environmentObject(state)
+                    .environmentObject(state.clipboardViewModel)
             )
             window = panel
         }

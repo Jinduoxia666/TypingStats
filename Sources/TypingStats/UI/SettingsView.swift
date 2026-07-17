@@ -58,9 +58,22 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
+
+            Text(versionText)
+                .font(.caption2)
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        return "版本 \(version) (\(build))"
     }
 }
 

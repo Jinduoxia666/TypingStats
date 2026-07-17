@@ -1,7 +1,7 @@
 import Foundation
 import MachO
 
-struct MemoryStats {
+struct MemoryStats: Equatable {
     let appResidentBytes: UInt64
     let systemUsedBytes: UInt64
     let systemTotalBytes: UInt64

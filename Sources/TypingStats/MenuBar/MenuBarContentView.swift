@@ -48,6 +48,7 @@ struct MenuBarLabel: View {
 
 struct MenuBarContentView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var hardware: HardwareStatsModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -141,19 +142,19 @@ struct MenuBarContentView: View {
     }
 
     private var hardwareIconName: String {
-        state.cpuTemperatureCelsius == nil ? "thermometer.sun" : "thermometer.medium"
+        hardware.snapshot.cpuTemperatureCelsius == nil ? "thermometer.sun" : "thermometer.medium"
     }
 
     private var hardwareLabelText: String {
-        state.cpuTemperatureCelsius == nil ? "系统热状态" : "CPU 温度"
+        hardware.snapshot.cpuTemperatureCelsius == nil ? "系统热状态" : "CPU 温度"
     }
 
     private var hardwareValueText: String {
-        if let value = state.cpuTemperatureCelsius {
+        if let value = hardware.snapshot.cpuTemperatureCelsius {
             return "\(Int(value.rounded()))°C"
         }
 
-        switch state.systemThermalState {
+        switch hardware.snapshot.systemThermalState {
         case .nominal:
             return "正常"
         case .fair:
@@ -168,12 +169,12 @@ struct MenuBarContentView: View {
     }
 
     private var appMemoryText: String {
-        guard let memoryStats = state.memoryStats else { return "不可用" }
+        guard let memoryStats = hardware.snapshot.memoryStats else { return "不可用" }
         return formatBytes(memoryStats.appResidentBytes)
     }
 
     private var systemMemoryText: String {
-        guard let memoryStats = state.memoryStats else { return "不可用" }
+        guard let memoryStats = hardware.snapshot.memoryStats else { return "不可用" }
         return "\(formatBytes(memoryStats.systemUsedBytes)) / \(formatBytes(memoryStats.systemTotalBytes))"
     }
 

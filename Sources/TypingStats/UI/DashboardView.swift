@@ -16,7 +16,7 @@ struct DashboardView: View {
 /// AppState publishes hardware, sync, clipboard, and typing updates; observing it
 /// in DashboardView would rebuild the tab labels for every unrelated change.
 private struct TodayDashboardView: View {
-    @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var model: DashboardStatsModel
     @State private var todayApps: [DashboardAppBreakdown] = []
     @State private var weekDays: [DeviceDayBreakdown] = []
     /// Keystroke counts at the last reload, so the periodic refresh can skip
@@ -25,7 +25,7 @@ private struct TodayDashboardView: View {
     @State private var isReloadingToday = false
     @State private var needsTodayReload = false
     /// Merged stats reads snapshot files off disk; refresh them on a slow tick
-    /// instead of per keystroke (the headline number is live via `state`).
+    /// instead of per keystroke (the headline number is live via `model`).
     private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -62,8 +62,8 @@ private struct TodayDashboardView: View {
         .padding()
         .onAppear(perform: reloadToday)
         .onReceive(refreshTimer) { _ in
-            guard state.todayKeystrokes != lastReloadedCounts.local
-                || state.otherDevicesTodayKeystrokes != lastReloadedCounts.others else { return }
+            guard stats.todayKeystrokes != lastReloadedCounts.local
+                || stats.otherDevicesTodayKeystrokes != lastReloadedCounts.others else { return }
             reloadToday()
         }
     }
@@ -177,24 +177,26 @@ private struct TodayDashboardView: View {
     }
 
     private func chars(_ keystrokes: Int) -> Int {
-        CharEstimate.characters(fromKeystrokes: keystrokes, factor: state.keystrokesPerCharacter)
+        CharEstimate.characters(fromKeystrokes: keystrokes, factor: stats.keystrokesPerCharacter)
     }
 
     private var totalChars: Int {
-        CharEstimate.characters(fromKeystrokes: state.todayKeystrokesMerged, factor: state.keystrokesPerCharacter)
+        CharEstimate.characters(fromKeystrokes: stats.todayKeystrokesMerged, factor: stats.keystrokesPerCharacter)
     }
 
     private var otherDevicesChars: Int {
-        chars(state.otherDevicesTodayKeystrokes)
+        chars(stats.otherDevicesTodayKeystrokes)
     }
 
     private var localChars: Int {
-        chars(state.todayKeystrokes)
+        chars(stats.todayKeystrokes)
     }
 
     private var deviceCount: Int {
-        max(state.syncedDevices.count, 1)
+        stats.deviceCount
     }
+
+    private var stats: DashboardStatsSnapshot { model.snapshot }
 
     private var topAppTitle: String {
         guard let app = todayApps.first else { return "暂无" }
@@ -326,7 +328,7 @@ private struct TodayDashboardView: View {
             return
         }
         isReloadingToday = true
-        lastReloadedCounts = (state.todayKeystrokes, state.otherDevicesTodayKeystrokes)
+        lastReloadedCounts = (stats.todayKeystrokes, stats.otherDevicesTodayKeystrokes)
         DispatchQueue.global(qos: .userInitiated).async {
             let merged = MergedStats()
             let apps = Self.dashboardAppBreakdowns(from: merged.topAppsTodayByDevice(limit: 10), limit: 5)

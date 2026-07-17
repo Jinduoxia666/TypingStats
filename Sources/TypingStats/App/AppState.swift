@@ -6,7 +6,10 @@ import AppKit
 @MainActor
 final class AppState: ObservableObject {
     @Published private(set) var todayKeystrokes: Int = 0 {
-        didSet { refreshMenuBarLabel() }
+        didSet {
+            refreshMenuBarLabel()
+            refreshDashboardStats()
+        }
     }
     @Published private(set) var permissionStatus: PermissionStatus = .unknown {
         didSet { refreshMenuBarLabel() }
@@ -19,27 +22,28 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(keystrokesPerCharacter, forKey: CharEstimate.factorKey)
             refreshMenuBarLabel()
+            refreshDashboardStats()
         }
     }
     /// Today's keystrokes contributed by the user's OTHER Macs (via iCloud sync).
     @Published private(set) var otherDevicesTodayKeystrokes: Int = 0 {
-        didSet { refreshMenuBarLabel() }
+        didSet {
+            refreshMenuBarLabel()
+            refreshDashboardStats()
+        }
     }
     @Published private(set) var syncAvailable: Bool = false
-    @Published private(set) var syncedDevices: [SyncedDeviceInfo] = []
-    @Published private(set) var cpuTemperatureCelsius: Double?
-    @Published private(set) var systemThermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
-    @Published private(set) var memoryStats: MemoryStats?
-    @Published private(set) var clipboardItems: [ClipboardHistoryItem] = []
-    @Published private(set) var clipboardSelectionIndex: Int = 0
-    @Published var timestampInput: String = ""
-    @Published private(set) var timestampSelectionIndex: Int = 0
-    @Published private(set) var timestampNow = Date()
+    @Published private(set) var syncedDevices: [SyncedDeviceInfo] = [] {
+        didSet { refreshDashboardStats() }
+    }
+    private(set) var clipboardItems: [ClipboardHistoryItem] = []
+    private(set) var clipboardSelectionIndex: Int = 0
     @Published var clipboardShortcut: ClipboardShortcut {
         didSet {
             UserDefaults.standard.set(Int(clipboardShortcut.keyCode), forKey: Keys.clipboardShortcutKeyCode)
             UserDefaults.standard.set(Int(clipboardShortcut.modifiers), forKey: Keys.clipboardShortcutModifiers)
             clipboardHotKeyMonitor?.update(shortcut: clipboardShortcut)
+            clipboardViewModel.update(shortcut: clipboardShortcut)
         }
     }
     @Published var timestampShortcut: ClipboardShortcut {
@@ -52,9 +56,7 @@ final class AppState: ObservableObject {
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
-    var timestampItems: [TimestampConversionItem] {
-        TimestampConversionItem.items(input: timestampInput, now: timestampNow)
-    }
+    var timestampItems: [TimestampConversionItem] { timestampViewModel.items }
 
     private enum Keys {
         static let excluded = "excludedBundleIds"
@@ -67,6 +69,10 @@ final class AppState: ObservableObject {
     /// Drives the always-visible menu-bar label; see MenuBarLabelModel for why
     /// it's separate from this (chatty) object.
     let menuBarLabel = MenuBarLabelModel()
+    let dashboardStats = DashboardStatsModel()
+    let hardwareStats = HardwareStatsModel()
+    let clipboardViewModel = ClipboardViewModel()
+    let timestampViewModel = TimestampViewModel()
 
     private let monitor: KeystrokeMonitor
     private let database: DatabaseManager
@@ -85,7 +91,6 @@ final class AppState: ObservableObject {
     private var syncTimer: Timer?
     private var writeTimer: Timer?
     private var cpuTemperatureTimer: Timer?
-    private var timestampTimer: Timer?
     private var clipboardCancellable: AnyCancellable?
     private var clipboardHotKeyMonitor: ClipboardHotKeyMonitor?
     private var clipboardWindowController: ClipboardHistoryWindowController?
@@ -122,6 +127,16 @@ final class AppState: ObservableObject {
         self.database = DatabaseManager.shared
         self.monitor = KeystrokeMonitor()
 
+        clipboardViewModel.configure(
+            onClear: { [weak self] in self?.clearClipboardHistory() },
+            onPaste: { [weak self] item in self?.pasteClipboardItem(item) },
+            onSelect: { [weak self] index in self?.selectClipboardItem(at: index) }
+        )
+        timestampViewModel.configure { [weak self] item in
+            self?.pasteTimestampItem(item)
+        }
+        clipboardViewModel.update(shortcut: clipboardShortcut)
+
         monitor.onKeystroke = { [weak self] app in
             // The CGEventTap callback runs on the main run loop, so we're already
             // on the main actor's thread — no need to hop through a Task.
@@ -136,6 +151,7 @@ final class AppState: ObservableObject {
         todayKeystrokes = restoredTodayKeystrokes
         // Property observers don't fire during init; seed the label explicitly.
         refreshMenuBarLabel()
+        refreshDashboardStats()
 
         refreshPermissions()
         startPermissionWatcher()
@@ -198,7 +214,7 @@ final class AppState: ObservableObject {
               TimestampConversionItem.isConvertibleInput(value) else {
             return
         }
-        timestampInput = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        timestampViewModel.input = value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func closeTimestampTool(returnToMenuBarOnly: Bool = true) {
@@ -236,22 +252,18 @@ final class AppState: ObservableObject {
     }
 
     func selectTimestampItem(at index: Int) {
-        let items = timestampItems
-        guard !items.isEmpty else {
-            timestampSelectionIndex = 0
-            return
-        }
-        timestampSelectionIndex = min(max(index, 0), items.count - 1)
+        timestampViewModel.select(at: index)
     }
 
     func moveTimestampSelection(by delta: Int) {
-        selectTimestampItem(at: timestampSelectionIndex + delta)
+        timestampViewModel.moveSelection(by: delta)
     }
 
     func pasteSelectedTimestampItem() {
         let items = timestampItems
-        guard items.indices.contains(timestampSelectionIndex) else { return }
-        pasteTimestampItem(items[timestampSelectionIndex])
+        let index = timestampViewModel.selectionIndex
+        guard items.indices.contains(index) else { return }
+        pasteTimestampItem(items[index])
     }
 
     func pasteTimestampItem(_ item: TimestampConversionItem) {
@@ -263,16 +275,11 @@ final class AppState: ObservableObject {
     }
 
     private func startTimestampTimer() {
-        timestampTimer?.invalidate()
-        timestampNow = Date()
-        timestampTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.timestampNow = Date() }
-        }
+        timestampViewModel.start()
     }
 
     private func stopTimestampTimer() {
-        timestampTimer?.invalidate()
-        timestampTimer = nil
+        timestampViewModel.stop()
     }
 
     func pasteClipboardItem(_ item: ClipboardHistoryItem) {
@@ -311,10 +318,12 @@ final class AppState: ObservableObject {
     func selectClipboardItem(at index: Int) {
         guard !clipboardItems.isEmpty else {
             clipboardSelectionIndex = 0
+            clipboardViewModel.update(selectionIndex: 0)
             return
         }
         let maxIndex = min(clipboardItems.count, ClipboardPickerConfig.maxItems) - 1
         clipboardSelectionIndex = min(max(index, 0), maxIndex)
+        clipboardViewModel.update(selectionIndex: clipboardSelectionIndex)
     }
 
     func moveClipboardSelection(by delta: Int) {
@@ -385,17 +394,36 @@ final class AppState: ObservableObject {
             }
             Task { @MainActor in
                 guard let self else { return }
-                self.otherDevicesTodayKeystrokes = othersToday
+                if self.otherDevicesTodayKeystrokes != othersToday {
+                    self.otherDevicesTodayKeystrokes = othersToday
+                }
+                let previousSelf = self.syncedDevices.first { $0.isSelf }
+                let selfUpdatedAt = previousSelf?.name == DeviceIdentity.name
+                    && previousSelf?.todayKeystrokes == self.todayKeystrokes
+                    ? previousSelf?.updatedAt ?? Date()
+                    : Date()
                 let selfInfo = SyncedDeviceInfo(
                     id: DeviceIdentity.id,
                     name: DeviceIdentity.name,
-                    updatedAt: Date(),
+                    updatedAt: selfUpdatedAt,
                     todayKeystrokes: self.todayKeystrokes,
                     isSelf: true
                 )
-                self.syncedDevices = [selfInfo] + otherInfos.sorted { $0.name < $1.name }
+                let nextDevices = [selfInfo] + otherInfos.sorted { $0.name < $1.name }
+                if self.syncedDevices != nextDevices {
+                    self.syncedDevices = nextDevices
+                }
             }
         }
+    }
+
+    private func refreshDashboardStats() {
+        dashboardStats.update(
+            todayKeystrokes: todayKeystrokes,
+            otherDevicesTodayKeystrokes: otherDevicesTodayKeystrokes,
+            keystrokesPerCharacter: keystrokesPerCharacter,
+            deviceCount: syncedDevices.count
+        )
     }
 
     private func refreshMenuBarLabel() {
@@ -433,8 +461,10 @@ final class AppState: ObservableObject {
 
     private func startClipboardHistory() {
         clipboardItems = clipboardHistory.items
+        clipboardViewModel.update(items: clipboardItems)
         clipboardCancellable = clipboardHistory.$items.sink { [weak self] items in
             self?.clipboardItems = items
+            self?.clipboardViewModel.update(items: items)
             self?.selectClipboardItem(at: self?.clipboardSelectionIndex ?? 0)
         }
         clipboardHistory.start()
@@ -464,9 +494,11 @@ final class AppState: ObservableObject {
             let thermalState = ProcessInfo.processInfo.thermalState
             let memoryStats = memoryReader.read()
             Task { @MainActor in
-                self?.cpuTemperatureCelsius = value
-                self?.systemThermalState = thermalState
-                self?.memoryStats = memoryStats
+                self?.hardwareStats.update(
+                    cpuTemperatureCelsius: value,
+                    systemThermalState: thermalState,
+                    memoryStats: memoryStats
+                )
             }
         }
     }
