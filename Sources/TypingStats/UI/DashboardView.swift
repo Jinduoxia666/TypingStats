@@ -1,6 +1,21 @@
 import SwiftUI
 
 struct DashboardView: View {
+    var body: some View {
+        TabView {
+            TodayDashboardView().tabItem { Label("今日", systemImage: "calendar") }
+            HistoryChartView().tabItem { Label("历史", systemImage: "chart.bar") }
+            TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
+            ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
+        }
+        .padding()
+    }
+}
+
+/// Keeps the frequently changing statistics below the stable TabView shell.
+/// AppState publishes hardware, sync, clipboard, and typing updates; observing it
+/// in DashboardView would rebuild the tab labels for every unrelated change.
+private struct TodayDashboardView: View {
     @EnvironmentObject private var state: AppState
     @State private var todayApps: [DashboardAppBreakdown] = []
     @State private var weekDays: [DeviceDayBreakdown] = []
@@ -14,16 +29,6 @@ struct DashboardView: View {
     private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        TabView {
-            todayTab.tabItem { Label("今日", systemImage: "calendar") }
-            HistoryChartView().tabItem { Label("历史", systemImage: "chart.bar") }
-            TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
-            ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
-        }
-        .padding()
-    }
-
-    private var todayTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .center, spacing: 10) {
