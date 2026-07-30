@@ -4,6 +4,7 @@ import AppKit
 @main
 struct TypingStatsApp: App {
     @StateObject private var appState = AppState()
+    @StateObject private var fixedInputSource = FixedInputSourceController()
 
     var body: some Scene {
         MenuBarExtra {
@@ -39,6 +40,7 @@ struct TypingStatsApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
+                .environmentObject(fixedInputSource)
         }
     }
 }

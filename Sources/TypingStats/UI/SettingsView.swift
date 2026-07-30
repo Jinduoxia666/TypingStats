@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var fixedInputSource: FixedInputSourceController
 
     var body: some View {
         TabView {
@@ -11,7 +12,7 @@ struct SettingsView: View {
             SyncView().tabItem { Label("同步", systemImage: "icloud") }
             ExportView().tabItem { Label("数据", systemImage: "square.and.arrow.up") }
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 400)
     }
 
     private var general: some View {
@@ -28,6 +29,19 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Toggle("固定输入法", isOn: $fixedInputSource.isEnabled)
+
+            Picker("输入法", selection: $fixedInputSource.selectedInputSourceID) {
+                ForEach(fixedInputSource.availableInputSources) { inputSource in
+                    Text(inputSource.name).tag(inputSource.id)
+                }
+            }
+            .disabled(fixedInputSource.availableInputSources.isEmpty)
+
+            Text("启用后，切换到其他输入法时会自动恢复为所选输入法。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
                 Text("剪贴板历史快捷键")
