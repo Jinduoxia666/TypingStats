@@ -11,6 +11,7 @@ struct TypingStatsApp: App {
             MenuBarContentView()
                 .environmentObject(appState)
                 .environmentObject(appState.hardwareStats)
+                .environmentObject(fixedInputSource)
         } label: {
             MenuBarLabel()
                 .environmentObject(appState.menuBarLabel)

@@ -49,6 +49,7 @@ struct MenuBarLabel: View {
 struct MenuBarContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var hardware: HardwareStatsModel
+    @EnvironmentObject private var fixedInputSource: FixedInputSourceController
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -60,6 +61,8 @@ struct MenuBarContentView: View {
             } else {
                 statsRows
             }
+
+            fixedInputSourceControls
 
             Divider()
             actions
@@ -74,6 +77,24 @@ struct MenuBarContentView: View {
             Text("今日字数").font(.headline)
             Spacer()
         }
+    }
+
+    private var fixedInputSourceControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $fixedInputSource.isEnabled) {
+                Label("固定输入法", systemImage: "keyboard.badge.ellipsis")
+            }
+
+            Picker("输入法", selection: $fixedInputSource.selectedInputSourceID) {
+                ForEach(fixedInputSource.availableInputSources) { inputSource in
+                    Text(inputSource.name).tag(inputSource.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(fixedInputSource.availableInputSources.isEmpty)
+        }
+        .font(.caption)
+        .controlSize(.small)
     }
 
     private var statsRows: some View {

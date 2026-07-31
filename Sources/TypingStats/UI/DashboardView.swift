@@ -7,6 +7,7 @@ struct DashboardView: View {
             HistoryChartView().tabItem { Label("历史", systemImage: "chart.bar") }
             TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
             ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
+            NetworkSpeedTestView().tabItem { Label("测速", systemImage: "speedometer") }
         }
         .padding()
     }
