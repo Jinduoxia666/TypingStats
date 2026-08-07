@@ -49,14 +49,65 @@ enum NetworkQualityParser {
 }
 
 struct NetworkSpeedTestService {
-    func measure() async throws -> NetworkQualityResult {
+    static let testDurationRange = 5...120
+    static let defaultTestDurationSeconds = 20
+
+    static func arguments(maxRuntimeSeconds: Int) -> [String] {
+        let duration = min(max(maxRuntimeSeconds, 1), testDurationRange.upperBound)
+        return ["-c", "-M", String(duration)]
+    }
+
+    static func aggregate(_ results: [NetworkQualityResult]) throws -> NetworkQualityResult {
+        guard let lastResult = results.last else {
+            throw NetworkQualityError.invalidOutput
+        }
+
+        let count = Double(results.count)
+        return NetworkQualityResult(
+            responsivenessRPM: results.reduce(0) { $0 + $1.responsivenessRPM } / count,
+            idleLatencyMilliseconds: results.reduce(0) { $0 + $1.idleLatencyMilliseconds } / count,
+            downloadMegabitsPerSecond: results.reduce(0) { $0 + $1.downloadMegabitsPerSecond } / count,
+            uploadMegabitsPerSecond: results.reduce(0) { $0 + $1.uploadMegabitsPerSecond } / count,
+            downloadBytesTransferred: results.reduce(0) { $0 + $1.downloadBytesTransferred },
+            uploadBytesTransferred: results.reduce(0) { $0 + $1.uploadBytesTransferred },
+            interfaceName: lastResult.interfaceName,
+            testEndpoint: lastResult.testEndpoint
+        )
+    }
+
+    func measure(durationSeconds: Int) async throws -> NetworkQualityResult {
+        let duration = min(
+            max(durationSeconds, Self.testDurationRange.lowerBound),
+            Self.testDurationRange.upperBound
+        )
+        let deadline = Date().addingTimeInterval(TimeInterval(duration))
+        var results: [NetworkQualityResult] = []
+
+        while Date() < deadline {
+            try Task.checkCancellation()
+            let remainingSeconds = max(1, Int(ceil(deadline.timeIntervalSinceNow)))
+
+            do {
+                results.append(try await measureOnce(maxRuntimeSeconds: remainingSeconds))
+            } catch {
+                if !results.isEmpty, Date() >= deadline {
+                    break
+                }
+                throw error
+            }
+        }
+
+        return try Self.aggregate(results)
+    }
+
+    private func measureOnce(maxRuntimeSeconds: Int) async throws -> NetworkQualityResult {
         let processBox = ProcessBox()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         let process = processBox.process
 
         process.executableURL = URL(fileURLWithPath: "/usr/bin/networkQuality")
-        process.arguments = ["-c", "-M", "20"]
+        process.arguments = Self.arguments(maxRuntimeSeconds: maxRuntimeSeconds)
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 

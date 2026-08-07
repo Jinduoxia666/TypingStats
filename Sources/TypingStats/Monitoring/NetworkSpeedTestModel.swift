@@ -21,7 +21,7 @@ final class NetworkSpeedTestModel: ObservableObject {
         phase == .testing
     }
 
-    func start() {
+    func start(durationSeconds: Int) {
         cancel()
         let currentRunID = UUID()
         runID = currentRunID
@@ -31,7 +31,7 @@ final class NetworkSpeedTestModel: ObservableObject {
 
         testTask = Task { [weak self] in
             do {
-                let result = try await service.measure()
+                let result = try await service.measure(durationSeconds: durationSeconds)
                 guard self?.runID == currentRunID else { return }
                 self?.result = result
                 self?.phase = .completed

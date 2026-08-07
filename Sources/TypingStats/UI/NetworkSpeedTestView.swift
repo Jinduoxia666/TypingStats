@@ -2,6 +2,8 @@ import SwiftUI
 
 struct NetworkSpeedTestView: View {
     @StateObject private var model = NetworkSpeedTestModel()
+    @AppStorage("networkSpeedTestMaxRuntimeSeconds") private var testDurationSeconds =
+        NetworkSpeedTestService.defaultTestDurationSeconds
 
     var body: some View {
         ScrollView {
@@ -153,11 +155,29 @@ struct NetworkSpeedTestView: View {
     }
 
     private var controls: some View {
-        HStack {
+        HStack(spacing: 12) {
+            Stepper(
+                value: $testDurationSeconds,
+                in: NetworkSpeedTestService.testDurationRange,
+                step: 5
+            ) {
+                HStack(spacing: 6) {
+                    Text("持续测试时长")
+                    Text("\(testDurationSeconds) 秒")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(model.isRunning)
+
+            Spacer()
+
             if model.isRunning {
                 Button("取消", action: model.cancel)
             }
-            Button(primaryButtonTitle, action: model.start)
+            Button(primaryButtonTitle) {
+                model.start(durationSeconds: testDurationSeconds)
+            }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(model.isRunning)
@@ -165,7 +185,7 @@ struct NetworkSpeedTestView: View {
     }
 
     private var footer: some View {
-        Text("Apple 网络质量会产生测试流量，并行测量上下行容量和负载响应能力。RPM 越高表示交互响应越好，结果不会保存。")
+        Text("Apple 网络质量会在设定时长内连续测试。速度、延迟和响应能力显示多轮平均值，流量显示累计值；RPM 越高表示交互响应越好，结果不会保存。")
             .font(.caption)
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
