@@ -75,6 +75,19 @@ enum Migrations {
             }
         }
 
+        // Per-hour tallies, so the dashboard can show today's typing curve.
+        // Only filled from this migration onward; earlier days have no hourly
+        // detail (the daily totals are unaffected).
+        migrator.registerMigration("v3_hourly") { db in
+            try db.create(table: "hour_stat") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("date", .text).notNull().indexed()   // YYYY-MM-DD, local tz
+                t.column("hour", .integer).notNull()          // 0...23, local tz
+                t.column("keystrokes", .integer).notNull().defaults(to: 0)
+                t.uniqueKey(["date", "hour"])
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 }

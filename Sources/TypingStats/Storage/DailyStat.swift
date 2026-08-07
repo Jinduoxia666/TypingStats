@@ -13,6 +13,15 @@ struct DailyStat: Codable, FetchableRecord, PersistableRecord, Equatable {
     }
 }
 
+struct HourStat: Codable, FetchableRecord, PersistableRecord, Equatable {
+    static let databaseTableName = "hour_stat"
+
+    var id: Int64?
+    var date: String          // YYYY-MM-DD in local tz
+    var hour: Int             // 0...23 in local tz
+    var keystrokes: Int = 0
+}
+
 struct AppStat: Codable, FetchableRecord, PersistableRecord, Equatable {
     static let databaseTableName = "app_stat"
 

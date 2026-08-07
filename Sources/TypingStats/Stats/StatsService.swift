@@ -39,13 +39,26 @@ struct StatsService: Sendable {
         }
     }
 
-    /// Daily totals and per-app rows on/after `key`, fetched in a single read —
-    /// used to build the cloud sync snapshot without a per-day query storm.
-    func history(sinceKey key: String) throws -> (days: [DailyStat], apps: [AppStat]) {
+    /// Per-hour totals for a given day, hour → keystrokes (missing hours absent).
+    func hours(onKey key: String) throws -> [Int: Int] {
+        try db.dbQueue.read { db in
+            let rows = try HourStat.filter(Column("date") == key).fetchAll(db)
+            return Dictionary(rows.map { ($0.hour, $0.keystrokes) }, uniquingKeysWith: +)
+        }
+    }
+
+    /// Daily totals, per-app and per-hour rows for the sync snapshot, fetched in
+    /// a single read (no per-day query storm). Hourly rows get their own, much
+    /// nearer cutoff: they are ~24 rows per day and only the current day's are
+    /// ever read back, so carrying the full `key` range would bloat every
+    /// snapshot rewrite for nothing.
+    func history(sinceKey key: String, hoursSinceKey hourKey: String) throws
+        -> (days: [DailyStat], apps: [AppStat], hours: [HourStat]) {
         try db.dbQueue.read { db in
             let days = try DailyStat.filter(Column("date") >= key).fetchAll(db)
             let apps = try AppStat.filter(Column("date") >= key).fetchAll(db)
-            return (days, apps)
+            let hours = try HourStat.filter(Column("date") >= hourKey).fetchAll(db)
+            return (days, apps, hours)
         }
     }
 
@@ -98,11 +111,17 @@ struct StatsService: Sendable {
     ) throws {
         guard total > 0 else { return }
         let key = Self.dateKey(for: date)
+        let hour = Self.hourKey(for: date)
         try db.dbQueue.write { db in
             try db.execute(sql: """
                 INSERT INTO daily_stat (date, keystrokes) VALUES (?, ?)
                 ON CONFLICT(date) DO UPDATE SET keystrokes = keystrokes + excluded.keystrokes
                 """, arguments: [key, total])
+
+            try db.execute(sql: """
+                INSERT INTO hour_stat (date, hour, keystrokes) VALUES (?, ?, ?)
+                ON CONFLICT(date, hour) DO UPDATE SET keystrokes = keystrokes + excluded.keystrokes
+                """, arguments: [key, hour, total])
 
             for (bundleId, info) in apps {
                 try db.execute(sql: """
@@ -130,6 +149,17 @@ struct StatsService: Sendable {
     static func dateKey(for date: Date) -> String {
         dayFormatter.string(from: date)
     }
+
+    /// Local-timezone hour (0...23) a batch of keystrokes belongs to.
+    static func hourKey(for date: Date) -> Int {
+        hourCalendar.component(.hour, from: date)
+    }
+
+    private static let hourCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        return cal
+    }()
 }
 
 /// Coalesces per-keystroke writes on a background queue: keystrokes are tallied

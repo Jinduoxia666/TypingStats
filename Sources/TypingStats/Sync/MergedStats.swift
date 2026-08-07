@@ -33,6 +33,25 @@ struct DeviceDayBreakdown: Identifiable {
     var totalKeystrokes: Int { segments.reduce(0) { $0 + $1.keystrokes } }
 }
 
+/// One hour of one device's typing, for the dashboard's today-by-hour chart.
+struct DeviceHourStat: Identifiable {
+    let hour: Int             // 0...23, local time
+    let deviceId: String
+    let deviceName: String
+    let isSelf: Bool
+    let keystrokes: Int
+
+    var id: String { "\(hour)-\(deviceId)" }
+}
+
+struct DeviceHourBreakdown: Identifiable {
+    let hour: Int
+    let segments: [DeviceHourStat]
+
+    var id: Int { hour }
+    var totalKeystrokes: Int { segments.reduce(0) { $0 + $1.keystrokes } }
+}
+
 final class MergedStats {
     private let local = StatsService()
     private let others: [DeviceSnapshot]
@@ -92,6 +111,48 @@ final class MergedStats {
 
             segments.append(contentsOf: otherSegments)
             return DeviceDayBreakdown(date: key, segments: segments)
+        }
+    }
+
+    /// Today's totals for all 24 hours, split by device — hours with no typing
+    /// are still present (with no segments) so the chart keeps a full day's axis.
+    ///
+    /// Other devices report hours in *their* local timezone; a Mac in another
+    /// zone therefore lands on its own clock's hour, which is what "when was I
+    /// typing on that machine" means.
+    func todayHoursByDevice() -> [DeviceHourBreakdown] {
+        let key = StatsService.dateKey(for: Date())
+        let localHours = (try? local.hours(onKey: key)) ?? [:]
+        let otherHours: [(snap: DeviceSnapshot, hours: [String: Int])] = others.compactMap { snap in
+            guard let day = snap.days[key], !day.hours.isEmpty else { return nil }
+            return (snap, day.hours)
+        }
+
+        return (0..<24).map { hour in
+            var segments: [DeviceHourStat] = []
+            if let keys = localHours[hour], keys > 0 {
+                segments.append(DeviceHourStat(
+                    hour: hour,
+                    deviceId: DeviceIdentity.id,
+                    deviceName: DeviceIdentity.name,
+                    isSelf: true,
+                    keystrokes: keys
+                ))
+            }
+
+            segments.append(contentsOf: otherHours.compactMap { entry -> DeviceHourStat? in
+                guard let keys = entry.hours[String(hour)], keys > 0 else { return nil }
+                return DeviceHourStat(
+                    hour: hour,
+                    deviceId: entry.snap.deviceId,
+                    deviceName: entry.snap.deviceName,
+                    isSelf: false,
+                    keystrokes: keys
+                )
+            }
+            .sorted { $0.deviceName < $1.deviceName })
+
+            return DeviceHourBreakdown(hour: hour, segments: segments)
         }
     }
 

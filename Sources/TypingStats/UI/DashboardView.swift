@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 struct DashboardView: View {
     var body: some View {
@@ -19,7 +20,8 @@ struct DashboardView: View {
 private struct TodayDashboardView: View {
     @EnvironmentObject private var model: DashboardStatsModel
     @State private var todayApps: [DashboardAppBreakdown] = []
-    @State private var weekDays: [DeviceDayBreakdown] = []
+    @State private var todayHours: [DeviceHourBreakdown] = []
+    @State private var hoveredHour: Int?
     /// Keystroke counts at the last reload, so the periodic refresh can skip
     /// passes where nothing changed.
     @State private var lastReloadedCounts: (local: Int, others: Int) = (-1, -1)
@@ -97,30 +99,92 @@ private struct TodayDashboardView: View {
     private var trendSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("近 7 天")
+                Text("今日趋势")
                     .font(.headline)
                 Spacer()
-                Text("日均 \(weeklyAverageChars) 字")
+                // Doubles as the hover readout, so the chart itself needs no
+                // floating tooltip that could clip at the card's edges.
+                Text(hoveredHourText ?? peakHourText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
             deviceLegend
-            HStack(alignment: .bottom, spacing: 8) {
-                ForEach(weekDays) { day in
-                    VStack(spacing: 6) {
-                        stackedDayBar(day)
-                        Text(shortLabel(day.date))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 118, alignment: .bottom)
+            hourChart
         }
         .padding(14)
         .background(.quaternary.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var hourChart: some View {
+        Chart {
+            ForEach(hourSeries) { point in
+                AreaMark(
+                    x: .value("时间", point.hour),
+                    y: .value("字数", point.chars),
+                    series: .value("设备", point.deviceId),
+                    stacking: .standard
+                )
+                .foregroundStyle(areaGradient(for: point))
+                .interpolationMethod(.monotone)
+            }
+
+            // Rides exactly on top of the stacked areas (their sum), so it reads
+            // as the day's total curve however many devices are involved.
+            ForEach(todayHours) { hour in
+                LineMark(
+                    x: .value("时间", hour.hour),
+                    y: .value("字数", chars(hour.totalKeystrokes))
+                )
+                .foregroundStyle(totalLineColor)
+                .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .interpolationMethod(.monotone)
+            }
+
+            RuleMark(x: .value("时间", currentHour))
+                .foregroundStyle(.secondary.opacity(0.45))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+
+            if let hoveredHour {
+                RuleMark(x: .value("时间", hoveredHour))
+                    .foregroundStyle(.secondary.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+            }
+        }
+        .chartXScale(domain: 0...23)
+        .chartXAxis {
+            AxisMarks(values: [0, 3, 6, 9, 12, 15, 18, 21]) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let hour = value.as(Int.self) { Text("\(hour)") }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+                AxisGridLine()
+                AxisValueLabel()
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            let x = location.x - geo[proxy.plotAreaFrame].origin.x
+                            hoveredHour = proxy.value(atX: x, as: Int.self)
+                                .map { min(max($0, 0), 23) }
+                        case .ended:
+                            hoveredHour = nil
+                        }
+                    }
+            }
+        }
+        .frame(height: 132)
     }
 
     private var appSummarySection: some View {
@@ -208,15 +272,17 @@ private struct TodayDashboardView: View {
         max(todayApps.map { chars($0.totalKeystrokes) }.max() ?? 1, 1)
     }
 
-    private var weeklyAverageChars: Int {
-        let activeDays = weekDays.filter { $0.totalKeystrokes > 0 }
-        guard !activeDays.isEmpty else { return 0 }
-        let total = activeDays.reduce(0) { $0 + chars($1.totalKeystrokes) }
-        return total / activeDays.count
+    /// Busiest hour so far today, e.g. "峰值 14 时 · 1203 字".
+    private var peakHourText: String {
+        guard let peak = todayHours.max(by: { $0.totalKeystrokes < $1.totalKeystrokes }),
+              peak.totalKeystrokes > 0 else {
+            return "今天还没有记录"
+        }
+        return "峰值 \(peak.hour) 时 · \(chars(peak.totalKeystrokes)) 字"
     }
 
-    private var maxWeekChars: Int {
-        max(weekDays.map { chars($0.totalKeystrokes) }.max() ?? 1, 1)
+    private var currentHour: Int {
+        StatsService.hourKey(for: Date())
     }
 
     private var todayDateText: String {
@@ -230,28 +296,56 @@ private struct TodayDashboardView: View {
         return formatter
     }()
 
-    private func barHeight(for day: DeviceDayBreakdown) -> CGFloat {
-        let value = chars(day.totalKeystrokes)
-        guard value > 0 else { return 8 }
-        return max(12, 86 * CGFloat(value) / CGFloat(maxWeekChars))
-    }
-
-    private func stackedDayBar(_ day: DeviceDayBreakdown) -> some View {
-        let height = barHeight(for: day)
-        return VStack(spacing: 0) {
-            if day.totalKeystrokes > 0 {
-                ForEach(day.segments) { segment in
-                    Rectangle()
-                        .fill(DeviceColor.color(for: segment.deviceId, isSelf: segment.isSelf).opacity(0.78))
-                        .frame(height: max(3, height * CGFloat(segment.keystrokes) / CGFloat(day.totalKeystrokes)))
-                }
-            } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.16))
+    /// One point per (device, hour). Hours a device didn't type in still get a
+    /// zero: an area series has to be continuous, otherwise Charts draws a
+    /// straight line across the gap instead of dropping to the baseline.
+    private var hourSeries: [HourPoint] {
+        let devices = hourChartDevices
+        guard !devices.isEmpty else { return [] }
+        return todayHours.flatMap { hour in
+            devices.map { device in
+                let keystrokes = hour.segments.first { $0.deviceId == device.deviceId }?.keystrokes ?? 0
+                return HourPoint(
+                    hour: hour.hour,
+                    deviceId: device.deviceId,
+                    isSelf: device.isSelf,
+                    chars: chars(keystrokes)
+                )
             }
         }
-        .frame(height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    /// Devices that typed at all today, this Mac first — the stacking order.
+    private var hourChartDevices: [DeviceLegendItem] {
+        Self.devices(
+            in: todayHours.flatMap(\.segments).map {
+                ($0.deviceId, $0.deviceName, $0.isSelf)
+            }
+        )
+    }
+
+    private func areaGradient(for point: HourPoint) -> LinearGradient {
+        let color = DeviceColor.color(for: point.deviceId, isSelf: point.isSelf)
+        return LinearGradient(
+            colors: [color.opacity(0.45), color.opacity(0.05)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    /// With a single device the total *is* that device's line, so it keeps its
+    /// colour; once several devices stack, a neutral line reads as the sum
+    /// rather than as one more device.
+    private var totalLineColor: Color {
+        let devices = hourChartDevices
+        guard devices.count == 1, let only = devices.first else { return .primary.opacity(0.55) }
+        return DeviceColor.color(for: only.deviceId, isSelf: only.isSelf)
+    }
+
+    private var hoveredHourText: String? {
+        guard let hoveredHour,
+              let breakdown = todayHours.first(where: { $0.hour == hoveredHour }) else { return nil }
+        return "\(hoveredHour) 时 · \(chars(breakdown.totalKeystrokes)) 字"
     }
 
     private func stackedAppBar(_ app: DashboardAppBreakdown, width: CGFloat) -> some View {
@@ -291,36 +385,34 @@ private struct TodayDashboardView: View {
     }
 
     private var legendSegments: [DeviceLegendItem] {
+        Self.devices(
+            in: todayHours.flatMap(\.segments).map {
+                ($0.deviceId, $0.deviceName, $0.isSelf)
+            }
+            + todayApps.flatMap(\.segments).map {
+                ($0.deviceId, $0.deviceName, $0.isSelf)
+            }
+        )
+    }
+
+    /// Dedupes devices by id and orders them this-Mac-first, then by name — the
+    /// order both the legend and the chart's stacking follow.
+    private static func devices(
+        in segments: [(deviceId: String, deviceName: String, isSelf: Bool)]
+    ) -> [DeviceLegendItem] {
         var items: [DeviceLegendItem] = []
         var seen = Set<String>()
-
-        for segment in weekDays.flatMap(\.segments) {
-            if seen.insert(segment.deviceId).inserted {
-                items.append(DeviceLegendItem(
-                    deviceId: segment.deviceId,
-                    deviceName: segment.deviceName,
-                    isSelf: segment.isSelf
-                ))
-            }
+        for device in segments where seen.insert(device.deviceId).inserted {
+            items.append(DeviceLegendItem(
+                deviceId: device.deviceId,
+                deviceName: device.deviceName,
+                isSelf: device.isSelf
+            ))
         }
-        for segment in todayApps.flatMap(\.segments) {
-            if seen.insert(segment.deviceId).inserted {
-                items.append(DeviceLegendItem(
-                    deviceId: segment.deviceId,
-                    deviceName: segment.deviceName,
-                    isSelf: segment.isSelf
-                ))
-            }
-        }
-
         return items.sorted { lhs, rhs in
             if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
             return lhs.deviceName < rhs.deviceName
         }
-    }
-
-    private func shortLabel(_ key: String) -> String {
-        String(key.suffix(5))
     }
 
     private func reloadToday() {
@@ -333,10 +425,10 @@ private struct TodayDashboardView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let merged = MergedStats()
             let apps = Self.dashboardAppBreakdowns(from: merged.topAppsTodayByDevice(limit: 10), limit: 5)
-            let days = merged.recentDaysByDevice(7)
+            let hours = merged.todayHoursByDevice()
             DispatchQueue.main.async {
                 todayApps = apps
-                weekDays = days
+                todayHours = hours
                 isReloadingToday = false
                 if needsTodayReload {
                     needsTodayReload = false
@@ -397,6 +489,16 @@ private struct DashboardAppSegment: Identifiable {
     let keystrokes: Int
 
     var id: String { "\(bundleId)-\(deviceId)" }
+}
+
+/// One device's contribution in one hour, flattened for the area chart.
+private struct HourPoint: Identifiable {
+    let hour: Int
+    let deviceId: String
+    let isSelf: Bool
+    let chars: Int
+
+    var id: String { "\(hour)-\(deviceId)" }
 }
 
 private struct DeviceLegendItem: Identifiable {

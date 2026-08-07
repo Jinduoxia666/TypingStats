@@ -30,6 +30,24 @@ struct AppSnapshot: Codable {
 struct DaySnapshot: Codable {
     var keystrokes: Int
     var apps: [String: AppSnapshot]   // bundleId → per-app counts
+    /// "0"..."23" (local tz of the writing device) → keystrokes. Empty for days
+    /// written before hourly tracking existed — those keep their daily total but
+    /// contribute nothing to the hourly chart.
+    var hours: [String: Int] = [:]
+
+    init(keystrokes: Int, apps: [String: AppSnapshot], hours: [String: Int] = [:]) {
+        self.keystrokes = keystrokes
+        self.apps = apps
+        self.hours = hours
+    }
+
+    /// Hand-written so snapshots from older versions (no `hours` key) decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keystrokes = try c.decode(Int.self, forKey: .keystrokes)
+        apps = try c.decode([String: AppSnapshot].self, forKey: .apps)
+        hours = try c.decodeIfPresent([String: Int].self, forKey: .hours) ?? [:]
+    }
 }
 
 struct DeviceSnapshot: Codable {
@@ -66,6 +84,12 @@ final class CloudSyncStore: @unchecked Sendable {
     /// long the app has been collecting history. Older days remain in each
     /// device's local DB; only the cross-device merged view is limited.
     static let syncedDayCount = 365
+
+    /// Hourly detail is carried for far fewer days than the daily totals: the
+    /// dashboard only ever charts *today's* hours, and 24 entries per day would
+    /// otherwise make every 5-minute snapshot rewrite ~5x larger. A week leaves
+    /// room for timezone offsets and a device that has been offline for days.
+    static let syncedHourDayCount = 7
 
     private let fm = FileManager.default
     private let stats = StatsService()
@@ -120,7 +144,9 @@ final class CloudSyncStore: @unchecked Sendable {
         let cal = Calendar(identifier: .gregorian)
         let cutoffDate = cal.date(byAdding: .day, value: -(Self.syncedDayCount - 1), to: Date()) ?? Date()
         let cutoff = StatsService.dateKey(for: cutoffDate)
-        guard let history = try? stats.history(sinceKey: cutoff) else { return nil }
+        let hourCutoffDate = cal.date(byAdding: .day, value: -(Self.syncedHourDayCount - 1), to: Date()) ?? Date()
+        let hourCutoff = StatsService.dateKey(for: hourCutoffDate)
+        guard let history = try? stats.history(sinceKey: cutoff, hoursSinceKey: hourCutoff) else { return nil }
 
         var out: [String: DaySnapshot] = [:]
         for day in history.days {
@@ -129,6 +155,10 @@ final class CloudSyncStore: @unchecked Sendable {
         for a in history.apps {
             out[a.date, default: DaySnapshot(keystrokes: 0, apps: [:])]
                 .apps[a.bundleId] = AppSnapshot(name: a.appName, keystrokes: a.keystrokes)
+        }
+        for h in history.hours {
+            out[h.date, default: DaySnapshot(keystrokes: 0, apps: [:])]
+                .hours[String(h.hour), default: 0] += h.keystrokes
         }
         return DeviceSnapshot(
             deviceId: DeviceIdentity.id,
