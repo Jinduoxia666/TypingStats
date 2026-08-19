@@ -194,11 +194,17 @@ private struct LaunchdJobDetailView: View {
         }
         .task(id: job.label) {
             printOutput = nil
+            plistText = nil
+            // Never leave the previous job's log on screen while this one loads.
+            logFiles = []
             reloadLogs()
-            plistText = job.plistPath.flatMap { path in
-                LaunchdService.plistText(at: path)
-            }
             let label = job.label
+            let plistPath = job.plistPath
+            // Both of these hit the disk (and `launchctl print` forks a
+            // process), so neither belongs on the main actor.
+            plistText = await Task.detached(priority: .utility) {
+                plistPath.flatMap(LaunchdService.plistText(at:))
+            }.value
             printOutput = await Task.detached(priority: .utility) {
                 LaunchdService.printOutput(label: label)
             }.value
@@ -483,27 +489,10 @@ private struct LaunchdJobDetailView: View {
 
     /// Pinned to the bottom: the newest lines are the ones worth seeing first.
     private func logTailView(_ file: LaunchdLogFile) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                Text(file.tail)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(8)
-                Color.clear
-                    .frame(height: 1)
-                    .id(Self.logBottomAnchor)
-            }
-            .frame(height: 220)
+        MonospacedTextView(text: file.tail, scrollsToBottom: true)
+            .frame(height: MonospacedTextView.height(for: file.tail, maximum: 240))
             .background(.background.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onAppear {
-                proxy.scrollTo(Self.logBottomAnchor, anchor: .bottom)
-            }
-            .onChange(of: file.tail) { _ in
-                proxy.scrollTo(Self.logBottomAnchor, anchor: .bottom)
-            }
-        }
     }
 
     private func logMeta(_ file: LaunchdLogFile) -> String {
@@ -534,8 +523,6 @@ private struct LaunchdJobDetailView: View {
             isLoadingLogs = false
         }
     }
-
-    private static let logBottomAnchor = "log-bottom"
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -585,17 +572,11 @@ private struct LaunchdJobDetailView: View {
     }
 
     private func rawText(_ text: String) -> some View {
-        HStack(alignment: .top) {
-            Text(text)
-                .font(.system(.caption, design: .monospaced))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .padding(.top, 6)
+        MonospacedTextView(text: text, scrollsToBottom: false)
+            .frame(height: MonospacedTextView.height(for: text, maximum: 360))
+            .background(.quaternary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(.top, 6)
     }
 
     private func badge(_ text: String, color: Color) -> some View {
@@ -637,4 +618,59 @@ private struct LaunchdJobDetailView: View {
         formatter.unitsStyle = .full
         return formatter
     }()
+}
+
+/// Log and raw-output blocks run through AppKit rather than `Text`.
+///
+/// A few hundred lines in a selectable SwiftUI `Text` re-lay out on every
+/// rebuild of the enclosing view — and the detail pane rebuilds on every clock
+/// tick — which is what made opening a job with a real log feel stuck.
+/// `NSTextView` keeps its own layout across those rebuilds and only does work
+/// when the string actually changes.
+private struct MonospacedTextView: NSViewRepresentable {
+    let text: String
+    let scrollsToBottom: Bool
+
+    static func height(for text: String, maximum: CGFloat) -> CGFloat {
+        let lines = text.reduce(into: 1) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        return min(max(CGFloat(lines) * 15 + 16, 56), maximum)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+
+        if let textView = scrollView.documentView as? NSTextView {
+            textView.isEditable = false
+            textView.isRichText = false
+            textView.drawsBackground = false
+            textView.textContainerInset = NSSize(width: 6, height: 6)
+            textView.font = .monospacedSystemFont(
+                ofSize: NSFont.smallSystemFontSize,
+                weight: .regular
+            )
+            apply(text, to: textView)
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView,
+              textView.string != text else { return }
+        apply(text, to: textView)
+    }
+
+    private func apply(_ text: String, to textView: NSTextView) {
+        textView.string = text
+        guard scrollsToBottom else { return }
+        // The layout is not final until this pass ends, so the newest lines can
+        // only be scrolled to afterwards.
+        DispatchQueue.main.async {
+            textView.scrollToEndOfDocument(nil)
+        }
+    }
 }
