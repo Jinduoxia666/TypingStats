@@ -9,6 +9,7 @@ struct DashboardView: View {
             TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
             ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
             NetworkSpeedTestView().tabItem { Label("测速", systemImage: "speedometer") }
+            LaunchdView().tabItem { Label("Launchd", systemImage: "clock.badge.checkmark") }
         }
         .padding()
     }
