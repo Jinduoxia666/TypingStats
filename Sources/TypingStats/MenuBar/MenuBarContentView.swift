@@ -47,10 +47,12 @@ struct MenuBarLabel: View {
 }
 
 struct MenuBarContentView: View {
+    var dismissMenu: () -> Void
+    var showMainWindow: () -> Void
+
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var hardware: HardwareStatsModel
     @EnvironmentObject private var fixedInputSource: FixedInputSourceController
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -62,13 +64,26 @@ struct MenuBarContentView: View {
                 statsRows
             }
 
+            Divider()
             fixedInputSourceControls
 
             Divider()
             actions
+            Text(versionText)
+                .font(.system(size: 10))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .textSelection(.enabled)
         }
         .padding(16)
         .frame(width: 280)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.primary.opacity(0.2), lineWidth: 0.5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var header: some View {
@@ -81,20 +96,68 @@ struct MenuBarContentView: View {
 
     private var fixedInputSourceControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: $fixedInputSource.isEnabled) {
+            HStack {
                 Label("固定输入法", systemImage: "keyboard.badge.ellipsis")
+                Spacer()
+                Toggle("固定输入法", isOn: $fixedInputSource.isEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
             }
 
-            Picker("输入法", selection: $fixedInputSource.selectedInputSourceID) {
-                ForEach(fixedInputSource.availableInputSources) { inputSource in
-                    Text(inputSource.name).tag(inputSource.id)
+            HStack {
+                Text("输入法").foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Picker("输入法", selection: $fixedInputSource.selectedInputSourceID) {
+                        ForEach(fixedInputSource.availableInputSources) { inputSource in
+                            Text(inputSource.name).tag(inputSource.id)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(selectedInputSourceName)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .strokeBorder(.primary.opacity(0.1))
+                    }
                 }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .frame(width: 128)
+                .accessibilityLabel("输入法")
+                .accessibilityValue(selectedInputSourceName)
+                .help(selectedInputSourceName)
+                .disabled(fixedInputSource.availableInputSources.isEmpty)
             }
-            .pickerStyle(.menu)
-            .disabled(fixedInputSource.availableInputSources.isEmpty)
         }
         .font(.caption)
         .controlSize(.small)
+    }
+
+    private var selectedInputSourceName: String {
+        fixedInputSource.availableInputSources.first {
+            $0.id == fixedInputSource.selectedInputSourceID
+        }?.name ?? "暂无可用输入法"
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "版本 \(version) · \(build)"
     }
 
     private var statsRows: some View {
@@ -106,17 +169,20 @@ struct MenuBarContentView: View {
                 Text("字").foregroundStyle(.secondary)
                 Spacer()
             }
-            Text("本机 \(localChars) 字")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            if state.otherDevicesTodayKeystrokes > 0 {
-                Text("含其他设备 \(otherDevicesChars) 字")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 6) {
+                Text("本机 \(localChars) 字")
+                if state.otherDevicesTodayKeystrokes > 0 {
+                    Text("·")
+                    Text("其他设备 \(otherDevicesChars) 字")
+                }
             }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
             HStack(spacing: 6) {
                 Image(systemName: hardwareIconName)
                     .foregroundStyle(.secondary)
+                    .frame(width: 14)
                 Text(hardwareLabelText)
                 Spacer()
                 Text(hardwareValueText)
@@ -129,6 +195,7 @@ struct MenuBarContentView: View {
             HStack(spacing: 6) {
                 Image(systemName: "memorychip")
                     .foregroundStyle(.secondary)
+                    .frame(width: 14)
                 Text("本应用内存")
                 Spacer()
                 Text(appMemoryText)
@@ -140,6 +207,7 @@ struct MenuBarContentView: View {
             HStack(spacing: 6) {
                 Image(systemName: "chart.pie")
                     .foregroundStyle(.secondary)
+                    .frame(width: 14)
                 Text("系统内存")
                 Spacer()
                 Text(systemMemoryText)
@@ -226,6 +294,7 @@ struct MenuBarContentView: View {
             Button("退出") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")
         }
+        .controlSize(.small)
     }
 
     /// LSUIElement (menu-bar) apps don't activate or raise windows on their own,
@@ -233,9 +302,10 @@ struct MenuBarContentView: View {
     /// app and force the main window to the front on the next run-loop tick
     /// (after `openWindow` has created/registered it).
     private func openMainWindow() {
+        dismissMenu()
         state.prepareToOpenMainWindow()
         NSApp.setActivationPolicy(.regular)
-        openWindow(id: "main")
+        showMainWindow()
         DispatchQueue.main.async {
             state.prepareToOpenMainWindow()
             NSApp.activate(ignoringOtherApps: true)

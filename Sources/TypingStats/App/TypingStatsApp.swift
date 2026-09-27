@@ -6,18 +6,28 @@ struct TypingStatsApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var fixedInputSource = FixedInputSourceController()
 
-    var body: some Scene {
-        MenuBarExtra {
-            MenuBarContentView()
-                .environmentObject(appState)
-                .environmentObject(appState.hardwareStats)
-                .environmentObject(fixedInputSource)
-        } label: {
-            MenuBarLabel()
-                .environmentObject(appState.menuBarLabel)
-        }
-        .menuBarExtraStyle(.window)
+    @StateObject private var menuBarController = MenuBarPanelController()
+    @Environment(\.openWindow) private var openWindow
 
+    var body: some Scene {
+        let _ = menuBarController.configure(
+            state: appState, inputSource: fixedInputSource, openWindow: openWindow
+        )
+        // Keep menu-only launch behavior on macOS 13 and 14. The visible status
+        // item and its panel are owned by MenuBarPanelController.
+        MenuBarExtra("TypingStats", isInserted: .constant(false)) {
+            EmptyView()
+        }
+        mainWindow
+
+        Settings {
+            SettingsView()
+                .environmentObject(appState)
+                .environmentObject(fixedInputSource)
+        }
+    }
+
+    private var mainWindow: some Scene {
         Window("TypingStats", id: "main") {
             DashboardView()
                 .environmentObject(appState.dashboardStats)
@@ -36,13 +46,9 @@ struct TypingStatsApp: App {
                     AppActivation.returnToMenuBarOnly()
                 }
         }
+        .defaultSize(width: 860, height: 560)
         .windowResizability(.contentMinSize)
 
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-                .environmentObject(fixedInputSource)
-        }
     }
 }
 
