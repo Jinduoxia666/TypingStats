@@ -17,7 +17,7 @@ DMG_PATH        := $(BUILD_DIR)/$(APP_NAME)-$(PACKAGE_VERSION).dmg
 
 # Stable signing identity so the Accessibility (TCC) grant survives rebuilds.
 # Falls back to ad-hoc (-) if the cert isn't present on this machine.
-SIGN_ID     := Apple Development: REDACTED (ZR56Z9UGC3)
+SIGN_ID     := Apple Development: REDACTED (64AV3S356C)
 
 .PHONY: all build app run dmg test clean reset-perm
 
