@@ -44,7 +44,7 @@ final class ToolPanelKeyInterceptor {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
         if let tap {
-            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
         runLoopSource = nil
         tap = nil

@@ -20,6 +20,7 @@ final class ClipboardHistoryStore: ObservableObject {
     /// Image capture (TIFF→PNG conversion, hashing, thumbnailing, file writes)
     /// runs here so a big screenshot never stalls the main thread.
     private let processingQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.clipboard", qos: .utility)
+    private lazy var historyWriter = ClipboardHistoryWriter(storageURL: storageURL, queue: processingQueue)
     private enum ImagePayload {
         case png(Data)
         case tiff(Data)
@@ -254,23 +255,9 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     private func save() {
-        let stored = items.map { item in
-            StoredItem(
-                id: item.id,
-                kind: item.kind,
-                createdAt: item.createdAt,
-                text: item.text,
-                imageFileName: item.imageFileName,
-                thumbnailJPEGData: item.thumbnailJPEGData,
-                imagePNGData: nil,
-                contentHash: item.contentHash
-            )
-        }
-        guard let data = try? JSONEncoder().encode(stored) else { return }
-        let url = storageURL
-        processingQueue.async {
-            try? data.write(to: url, options: [.atomic])
-        }
+        // ClipboardHistoryItem has the same persisted fields as StoredItem;
+        // the legacy imagePNGData field is still read during load/migration.
+        historyWriter.save(items)
     }
 
     /// Delete image files no history item references (e.g. left behind by a

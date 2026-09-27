@@ -269,9 +269,10 @@ final class AppState: ObservableObject {
     func pasteTimestampItem(_ item: TimestampConversionItem) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(item.value, forType: .string)
-        timestampWindowController?.close()
+        let target = timestampTargetApplication
+        closeTimestampTool()
 
-        pasteIntoTarget(timestampTargetApplication)
+        pasteIntoTarget(target)
     }
 
     private func startTimestampTimer() {

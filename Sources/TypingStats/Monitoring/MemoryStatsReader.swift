@@ -41,8 +41,11 @@ struct MemoryStatsReader {
     }
 
     private func systemUsedBytes() -> UInt64? {
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
+
         var pageSize: vm_size_t = 0
-        guard host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS else { return nil }
+        guard host_page_size(host, &pageSize) == KERN_SUCCESS else { return nil }
 
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
@@ -50,7 +53,7 @@ struct MemoryStatsReader {
         let result = withUnsafeMutablePointer(to: &stats) { pointer in
             pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { reboundPointer in
                 host_statistics64(
-                    mach_host_self(),
+                    host,
                     HOST_VM_INFO64,
                     reboundPointer,
                     &count

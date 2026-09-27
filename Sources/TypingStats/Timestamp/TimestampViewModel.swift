@@ -14,6 +14,10 @@ final class TimestampViewModel: ObservableObject {
     private var timer: Timer?
     private var onPaste: (TimestampConversionItem) -> Void = { _ in }
 
+    deinit {
+        timer?.invalidate()
+    }
+
     func configure(onPaste: @escaping (TimestampConversionItem) -> Void) {
         self.onPaste = onPaste
     }

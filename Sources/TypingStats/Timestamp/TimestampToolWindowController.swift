@@ -72,7 +72,7 @@ final class TimestampToolWindowController {
         guard let state else { return }
         switch keyCode {
         case 53:
-            close()
+            state.closeTimestampTool()
         case 125:
             state.moveTimestampSelection(by: 1)
         case 126:

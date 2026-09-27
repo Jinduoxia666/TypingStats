@@ -29,7 +29,12 @@ final class KeystrokeMonitor {
     private var workspaceObserver: NSObjectProtocol?
     private var currentApp: FrontmostApp?
 
+    deinit {
+        stop()
+    }
+
     func start() {
+        stop()
         observeFrontmostApp()
         updateCurrentApp(NSWorkspace.shared.frontmostApplication)
         installTap()
@@ -40,7 +45,7 @@ final class KeystrokeMonitor {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
         if let tap {
-            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
         runLoopSource = nil
         tap = nil
