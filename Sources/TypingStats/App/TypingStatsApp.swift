@@ -3,6 +3,7 @@ import AppKit
 
 @main
 struct TypingStatsApp: App {
+    @NSApplicationDelegateAdaptor(TypingStatsDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var fixedInputSource = FixedInputSourceController()
 
@@ -61,8 +62,13 @@ enum AppActivation {
     static func returnToMenuBarOnly() {
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.accessory)
-            NSRunningApplication.current.hide()
         }
+    }
+}
+
+private final class TypingStatsDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
 
