@@ -1,11 +1,21 @@
 import SwiftUI
 
 struct NetworkSpeedTestView: View {
+    var isActive: Bool = true
+
     @StateObject private var model = NetworkSpeedTestModel()
     @AppStorage("networkSpeedTestMaxRuntimeSeconds") private var testDurationSeconds =
         NetworkSpeedTestService.defaultTestDurationSeconds
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         ScrollView {
             VStack(spacing: 20) {
                 header

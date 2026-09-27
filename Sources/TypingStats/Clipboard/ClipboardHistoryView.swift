@@ -2,9 +2,19 @@ import AppKit
 import SwiftUI
 
 struct ClipboardHistoryView: View {
+    var isActive: Bool = true
+
     @EnvironmentObject private var model: ClipboardViewModel
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {

@@ -1,9 +1,19 @@
 import SwiftUI
 
 struct TopAppView: View {
+    var isActive: Bool = true
+
     @State private var groups: [DeviceAppStats] = []
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("今日应用排行").font(.headline)
 

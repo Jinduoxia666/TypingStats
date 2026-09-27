@@ -5,11 +5,21 @@ import AppKit
 /// is loaded plus every LaunchAgent plist on disk, with one job's full
 /// configuration and its next trigger time on the right.
 struct LaunchdView: View {
+    var isActive: Bool = true
+
     @StateObject private var model = LaunchdJobsModel()
     @State private var selection: String?
     private let clockTimer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         HSplitView {
             jobList
                 .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)

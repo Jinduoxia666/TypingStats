@@ -2,16 +2,41 @@ import SwiftUI
 import Charts
 
 struct DashboardView: View {
+    private enum Tab: Hashable {
+        case today, history, apps, clipboard, network, launchd
+    }
+
+    @State private var selection: Tab = .today
+    @State private var loadedTabs: Set<Tab> = [.today]
+
     var body: some View {
-        TabView {
-            TodayDashboardView().tabItem { Label("今日", systemImage: "calendar") }
-            HistoryChartView().tabItem { Label("历史", systemImage: "chart.bar") }
-            TopAppView().tabItem { Label("应用", systemImage: "app.badge") }
-            ClipboardHistoryView().tabItem { Label("剪贴板", systemImage: "clipboard") }
-            NetworkSpeedTestView().tabItem { Label("测速", systemImage: "speedometer") }
-            LaunchdView().tabItem { Label("Launchd", systemImage: "clock.badge.checkmark") }
+        TabView(selection: $selection) {
+            tab(.today) { TodayDashboardView(isActive: selection == .today) }
+                .tabItem { Label("今日", systemImage: "calendar") }.tag(Tab.today)
+            tab(.history) { HistoryChartView(isActive: selection == .history) }
+                .tabItem { Label("历史", systemImage: "chart.bar") }.tag(Tab.history)
+            tab(.apps) { TopAppView(isActive: selection == .apps) }
+                .tabItem { Label("应用", systemImage: "app.badge") }.tag(Tab.apps)
+            tab(.clipboard) { ClipboardHistoryView(isActive: selection == .clipboard) }
+                .tabItem { Label("剪贴板", systemImage: "clipboard") }.tag(Tab.clipboard)
+            tab(.network) { NetworkSpeedTestView(isActive: selection == .network) }
+                .tabItem { Label("测速", systemImage: "speedometer") }.tag(Tab.network)
+            tab(.launchd) { LaunchdView(isActive: selection == .launchd) }
+                .tabItem { Label("Launchd", systemImage: "clock.badge.checkmark") }.tag(Tab.launchd)
         }
         .padding()
+        .onChange(of: selection) { loadedTabs.insert($0) }
+    }
+
+    @ViewBuilder
+    private func tab<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
+        // Keep each page's state after its first visit. The page itself removes
+        // its expensive UI while inactive, without discarding its model.
+        if selection == tab || loadedTabs.contains(tab) {
+            content()
+        } else {
+            Color.clear
+        }
     }
 }
 
@@ -19,6 +44,8 @@ struct DashboardView: View {
 /// AppState publishes hardware, sync, clipboard, and typing updates; observing it
 /// in DashboardView would rebuild the tab labels for every unrelated change.
 private struct TodayDashboardView: View {
+    var isActive: Bool = true
+
     @EnvironmentObject private var model: DashboardStatsModel
     @State private var todayApps: [DashboardAppBreakdown] = []
     @State private var todayHours: [DeviceHourBreakdown] = []
@@ -33,6 +60,14 @@ private struct TodayDashboardView: View {
     private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .center, spacing: 10) {

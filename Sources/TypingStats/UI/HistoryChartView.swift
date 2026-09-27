@@ -2,6 +2,8 @@ import SwiftUI
 import Charts
 
 struct HistoryChartView: View {
+    var isActive: Bool = true
+
     @State private var days: [DeviceDayBreakdown] = []
     @State private var range = 7
     @State private var selectedDate: String?
@@ -9,6 +11,14 @@ struct HistoryChartView: View {
     @State private var pendingRange: Int?
 
     var body: some View {
+        if isActive {
+            content
+        } else {
+            Color.clear
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("历史趋势").font(.headline)
