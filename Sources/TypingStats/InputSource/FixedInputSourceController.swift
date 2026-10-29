@@ -35,6 +35,11 @@ final class FixedInputSourceController: ObservableObject {
     private var inputSourcesByID: [String: TISInputSource] = [:]
     private var selectedSourceObserver: NSObjectProtocol?
     private var enabledSourcesObserver: NSObjectProtocol?
+    /// Restores triggered by system notifications happen at most once per window,
+    /// so apps that keep switching the input source don't cause a tug-of-war.
+    private let restoreThrottle: TimeInterval = 2
+    private var lastRestoreAt: Date?
+    private var pendingRestore: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -49,6 +54,7 @@ final class FixedInputSourceController: ObservableObject {
     }
 
     deinit {
+        pendingRestore?.cancel()
         if let selectedSourceObserver {
             DistributedNotificationCenter.default().removeObserver(selectedSourceObserver)
         }
@@ -64,7 +70,7 @@ final class FixedInputSourceController: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.enforceSelection()
+                self?.throttledEnforceSelection()
             }
         }
 
@@ -75,7 +81,7 @@ final class FixedInputSourceController: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshInputSources()
-                self?.enforceSelection()
+                self?.throttledEnforceSelection()
             }
         }
     }
@@ -113,6 +119,24 @@ final class FixedInputSourceController: ObservableObject {
         }
     }
 
+    /// Restores immediately if the last restore is older than `restoreThrottle`;
+    /// otherwise checks once more when the window ends.
+    private func throttledEnforceSelection() {
+        guard pendingRestore == nil else { return }
+        let elapsed = lastRestoreAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        guard elapsed < restoreThrottle else {
+            enforceSelection()
+            return
+        }
+        let delay = restoreThrottle - elapsed
+        pendingRestore = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.pendingRestore = nil
+            self.enforceSelection()
+        }
+    }
+
     private func enforceSelection() {
         guard isEnabled,
               Self.currentInputSourceID() != selectedInputSourceID,
@@ -120,6 +144,7 @@ final class FixedInputSourceController: ObservableObject {
             return
         }
         TISSelectInputSource(inputSource)
+        lastRestoreAt = Date()
     }
 
     private static func currentInputSourceID() -> String? {
