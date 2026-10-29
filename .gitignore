@@ -14,3 +14,6 @@ TypingStats.xcodeproj/
 
 # Local Claude Code config (machine-specific)
 .claude/settings.local.json
+
+# Local signing identity (personal certificate name)
+signing.local.mk

@@ -55,7 +55,13 @@ make dmg         # 生成 .build/TypingStats-<版本>-<时间戳>.dmg
 make reset-perm  # 重置辅助功能授权
 ```
 
-`Makefile` 里的 `SIGN_ID` 是作者的开发证书；本机没有这个证书时，会自动改用 ad-hoc 签名。使用 ad-hoc 签名时，每次重新构建后可能需要重新授权辅助功能。
+默认使用 ad-hoc 签名，每次重新构建后可能需要重新授权辅助功能。想用固定的证书签名、让授权在重新构建后保留，可以在项目根目录新建 `signing.local.mk`（已加入 `.gitignore`，不会提交）：
+
+```make
+SIGN_ID := Apple Development: 你的证书名称 (TEAMID)
+```
+
+也可以临时指定：`make app SIGN_ID="…"`。用 `security find-identity -v -p codesigning` 查看本机可用的证书。
 
 ## 隐私
 

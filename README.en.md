@@ -57,7 +57,13 @@ make dmg         # build .build/TypingStats-<version>-<timestamp>.dmg
 make reset-perm  # reset the Accessibility grant
 ```
 
-`SIGN_ID` in the `Makefile` is the author's development certificate. Without it, the build falls back to ad-hoc signing, and you may have to re-grant Accessibility after each rebuild.
+Builds are ad-hoc signed by default, so you may have to re-grant Accessibility after each rebuild. To sign with a stable certificate and keep the grant across rebuilds, create `signing.local.mk` in the repo root (it's in `.gitignore`):
+
+```make
+SIGN_ID := Apple Development: Your Name (TEAMID)
+```
+
+Or pass it once: `make app SIGN_ID="…"`. List available certificates with `security find-identity -v -p codesigning`.
 
 ## Privacy
 
