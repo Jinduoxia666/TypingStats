@@ -38,11 +38,15 @@ Both global shortcuts can be re-recorded in Settings → 通用. Main window pag
 
 ## Installation
 
-1. Open `TypingStats-<version>.dmg` and drag TypingStats into Applications.
-2. Launch it, click the warning icon in the menu bar and choose "授予权限" (Grant permission).
-3. Turn on TypingStats in System Settings → Privacy & Security → Accessibility. Counting starts automatically, no restart needed.
+1. Download `TypingStats-<version>.dmg` from [Releases](https://github.com/Jinduoxia666/TypingStats/releases), open it and drag TypingStats into Applications.
+2. Release builds are not notarized, so macOS blocks the first launch. Either run the command below, or click "Open Anyway" in System Settings → Privacy & Security:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/TypingStats.app
+   ```
+3. Launch it, click the warning icon in the menu bar and choose "授予权限" (Grant permission).
+4. Turn on TypingStats in System Settings → Privacy & Security → Accessibility. Counting starts automatically, no restart needed.
 
-> Current builds are signed with a development certificate and are not notarized. On another Mac you may need to right-click → Open, or click "Open Anyway" in Privacy & Security.
+> Release builds are ad-hoc signed and Apple Silicon only. macOS treats each update as a different app, so after upgrading, remove the old TypingStats entry from the Accessibility list and grant permission again.
 
 ## Building from source
 

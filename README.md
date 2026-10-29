@@ -36,11 +36,15 @@
 
 ## 安装
 
-1. 打开 `TypingStats-<版本>.dmg`，把 TypingStats 拖进「应用程序」
-2. 启动后点击菜单栏的警告图标，选择「授予权限」
-3. 在「系统设置 → 隐私与安全性 → 辅助功能」中打开 TypingStats，无需重启，自动开始计数
+1. 从 [Releases](https://github.com/Jinduoxia666/TypingStats/releases) 下载 `TypingStats-<版本>.dmg`，打开后把 TypingStats 拖进「应用程序」
+2. Release 里的包没有经过公证，第一次打开会被系统拦截。可以在终端执行下面的命令，或者到「系统设置 → 隐私与安全性」里点「仍要打开」：
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/TypingStats.app
+   ```
+3. 启动后点击菜单栏的警告图标，选择「授予权限」
+4. 在「系统设置 → 隐私与安全性 → 辅助功能」中打开 TypingStats，无需重启，自动开始计数
 
-> 当前版本使用开发证书签名，未经过公证。在其他 Mac 上首次打开时，可能需要右键选择「打开」，或在「隐私与安全性」中点「仍要打开」。
+> Release 里的包是 ad-hoc 签名，只支持 Apple 芯片。每次升级后，系统会把新版本当成另一个 App：需要先在「辅助功能」列表里删掉旧的 TypingStats，再重新授权一次。
 
 ## 从源码构建
 
