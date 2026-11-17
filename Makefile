@@ -19,8 +19,8 @@ DMG_PATH        := $(BUILD_DIR)/$(APP_NAME)-$(PACKAGE_VERSION).dmg
 
 # Stable signing identity so the Accessibility (TCC) grant survives rebuilds.
 # Set it in the untracked signing.local.mk (`SIGN_ID := Apple Development: …`)
-# or the environment; defaults to ad-hoc (-), which is also the fallback when
-# the cert isn't present on this machine.
+# or the environment; defaults to ad-hoc (-). An explicitly selected identity
+# must succeed; never silently publish an ad-hoc build instead.
 -include signing.local.mk
 SIGN_ID     ?= -
 
@@ -46,10 +46,8 @@ app: build widget
 	@cp Resources/AppIcon.icns "$(APP_BUNDLE)/Contents/Resources/AppIcon.icns"
 	@mkdir -p "$(APP_BUNDLE)/Contents/PlugIns"
 	@cp -R "$(WIDGET_BUNDLE)" "$(APP_BUNDLE)/Contents/PlugIns/"
-	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/CalculatorWidget.entitlements "$(APP_BUNDLE)/Contents/PlugIns/CalculatorWidget.appex" \
-		|| codesign --force --sign - --entitlements Resources/CalculatorWidget.entitlements "$(APP_BUNDLE)/Contents/PlugIns/CalculatorWidget.appex"
-	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)" \
-		|| codesign --force --sign - --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)"
+	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/CalculatorWidget.entitlements "$(APP_BUNDLE)/Contents/PlugIns/CalculatorWidget.appex"
+	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)"
 	@codesign --verify --deep --strict "$(APP_BUNDLE)"
 	@echo "Built: $(APP_BUNDLE) ($(PACKAGE_VERSION))"
 

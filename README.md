@@ -45,7 +45,7 @@
 3. 启动后点击菜单栏的警告图标，选择「授予权限」
 4. 在「系统设置 → 隐私与安全性 → 辅助功能」中打开 TypingStats，无需重启，自动开始计数
 
-> Release 里的包是 ad-hoc 签名，只支持 Apple 芯片。每次升级后，系统会把新版本当成另一个 App：需要先在「辅助功能」列表里删掉旧的 TypingStats，再重新授权一次。
+> Release 只支持 Apple 芯片。配置下述 Secrets 后，新 Release 使用固定开发证书签名，但仍未公证。从旧的 ad-hoc 版本升级或更换签名身份后，可能需要在「辅助功能」列表里删掉旧的 TypingStats，再重新授权。
 
 ## 桌面计算器小组件
 
@@ -75,6 +75,28 @@ SIGN_ID := Apple Development: 你的证书名称 (TEAMID)
 ```
 
 也可以临时指定：`make app SIGN_ID="…"`。用 `security find-identity -v -p codesigning` 查看本机可用的证书。
+
+### GitHub Actions 开发证书签名
+
+推送 `v*` 标签会运行 `.github/workflows/release.yml`。工作流要求以下四个 Repository secrets；缺失、证书无效或签名失败都会停止发布，不会回退到 ad-hoc。本机显式指定证书后，签名失败也会停止构建。
+
+1. 打开 macOS「钥匙串访问」→「登录」→「我的证书」，找到 `signing.local.mk` 指定的 Apple Development 证书。展开证书，确认下面有私钥且证书未过期。如果命令 `security find-identity -v -p codesigning` 显示 0 个有效身份，先检查证书有效期、私钥、钥匙串是否解锁及 Apple 中间证书；不要把仅有的 `.cer` 文件当成签名身份。
+2. 选中该证书，右键导出为 `.p12`，设置导出密码。文件应保存在仓库外，例如 `~/Desktop/TypingStats-signing.p12`。若不能导出 P12，检查是否拥有对应私钥。
+3. 执行 `base64 -i ~/Desktop/TypingStats-signing.p12 | pbcopy`，把结果复制到下面的证书 Secret；不要把 P12、密码或 Base64 内容提交到仓库或贴到日志中。
+4. 打开 GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret，逐一配置：
+
+| Secret | 内容 |
+|---|---|
+| `BUILD_CERTIFICATE_BASE64` | 上一步复制的 P12 Base64 全文 |
+| `P12_PASSWORD` | 导出 P12 时设置的密码 |
+| `KEYCHAIN_PASSWORD` | 新生成的随机密码，仅用于 runner 临时钥匙串，不是 Mac 登录密码 |
+| `SIGN_ID` | `security find-identity -v -p codesigning` 中该证书对应的 40 位 SHA-1 指纹，不含空格、引号或证书名称 |
+
+本机可继续通过证书名称签名；CI 使用同一证书的指纹，准确选择导入的身份。每次任务都会把 P12 导入临时钥匙串，依次签名 Widget 和主 App、验证签名，再打包；成功或失败均执行凭据清理。证书到期或更换时，需要重新导出并更新相关 Secrets。
+
+配置完成后推送新的版本标签触发发布。开发签名不等于 Developer ID 签名或 Apple 公证，下载后的 Gatekeeper 提示仍可能出现，也不能保证辅助功能授权在所有升级情况下保留。
+
+参考：[GitHub 官方证书导入说明](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)。
 
 ## 隐私
 

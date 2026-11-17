@@ -47,7 +47,7 @@ Both global shortcuts can be re-recorded in Settings → 通用. Main window pag
 3. Launch it, click the warning icon in the menu bar and choose "授予权限" (Grant permission).
 4. Turn on TypingStats in System Settings → Privacy & Security → Accessibility. Counting starts automatically, no restart needed.
 
-> Release builds are ad-hoc signed and Apple Silicon only. macOS treats each update as a different app, so after upgrading, remove the old TypingStats entry from the Accessibility list and grant permission again.
+> Release builds are Apple Silicon only. Once signing secrets are configured, new releases use a fixed development certificate but remain unnotarized. Upgrading from an old ad-hoc build or changing signing identity may require removing the old Accessibility entry and granting permission again. See the [CI signing setup](README.md#github-actions-开发证书签名).
 
 ## Building from source
 

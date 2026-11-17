@@ -28,9 +28,46 @@ jobs:
       - name: Install XcodeGen
         run: command -v xcodegen >/dev/null || brew install xcodegen
 
-      # No signing.local.mk on the runner, so the app is ad-hoc signed.
+      - name: Import development certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGN_ID: ${{ secrets.SIGN_ID }}
+        run: |
+          set -euo pipefail
+          : "${BUILD_CERTIFICATE_BASE64:?Missing BUILD_CERTIFICATE_BASE64 secret}"
+          : "${P12_PASSWORD:?Missing P12_PASSWORD secret}"
+          : "${KEYCHAIN_PASSWORD:?Missing KEYCHAIN_PASSWORD secret}"
+          : "${SIGN_ID:?Missing SIGN_ID secret}"
+          # Require the certificate SHA-1 fingerprint, preventing ambiguous names
+          # and accidental ad-hoc signing with SIGN_ID=-.
+          [[ "$SIGN_ID" =~ ^[[:xdigit:]]{40}$ ]] || { echo 'SIGN_ID must be a 40-character certificate SHA-1 fingerprint'; exit 1; }
+          CERTIFICATE_PATH="$RUNNER_TEMP/signing-certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          umask 077
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -Fiq -- "$SIGN_ID"
+          rm -f "$CERTIFICATE_PATH"
+
       - name: Build DMG
-        run: make dmg APP_VERSION="${GITHUB_REF_NAME#v}"
+        env:
+          SIGN_ID: ${{ secrets.SIGN_ID }}
+        run: make dmg APP_VERSION="${GITHUB_REF_NAME#v}" SIGN_ID="$SIGN_ID"
+
+      - name: Clean up signing credentials
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/signing-certificate.p12"
+          if [[ -f "$RUNNER_TEMP/app-signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db"
+          fi
 
       - name: Publish release
         env:
