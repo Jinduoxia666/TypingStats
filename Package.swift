@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "TypingStats",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .executable(name: "TypingStats", targets: ["TypingStats"]),
     ],

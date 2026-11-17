@@ -4,6 +4,8 @@ BUILD_DIR   := .build
 APP_BUNDLE  := $(BUILD_DIR)/$(APP_NAME).app
 BIN_PATH    := $(BUILD_DIR)/$(CONFIG)/$(APP_NAME)
 STAGING     := $(BUILD_DIR)/dmg-staging
+WIDGET_BUILD := $(BUILD_DIR)/widget
+WIDGET_BUNDLE := $(WIDGET_BUILD)/Build/Products/Release/CalculatorWidget.appex
 
 # Keep the human-facing version stable, while every packaging invocation gets
 # a sortable, unique build version. The same values are embedded in the app and
@@ -22,14 +24,18 @@ DMG_PATH        := $(BUILD_DIR)/$(APP_NAME)-$(PACKAGE_VERSION).dmg
 -include signing.local.mk
 SIGN_ID     ?= -
 
-.PHONY: all build app run dmg test clean reset-perm
+.PHONY: all build widget app run dmg test clean reset-perm
 
 all: app
 
 build:
 	swift build -c $(CONFIG)
 
-app: build
+widget:
+	xcodegen generate
+	xcodebuild -project TypingStats.xcodeproj -scheme CalculatorWidget -configuration Release -destination 'platform=macOS' -derivedDataPath "$(WIDGET_BUILD)" -skipPackageUpdates CODE_SIGNING_ALLOWED=NO MARKETING_VERSION="$(APP_VERSION)" CURRENT_PROJECT_VERSION="$(BUILD_VERSION)" build
+
+app: build widget
 	@rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
@@ -38,9 +44,13 @@ app: build
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(APP_VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_VERSION)" "$(APP_BUNDLE)/Contents/Info.plist"
 	@cp Resources/AppIcon.icns "$(APP_BUNDLE)/Contents/Resources/AppIcon.icns"
-	@codesign --force --deep --sign "$(SIGN_ID)" --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)" 2>/dev/null \
-		|| codesign --force --deep --sign - --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)" 2>/dev/null \
-		|| codesign --force --deep --sign - "$(APP_BUNDLE)"
+	@mkdir -p "$(APP_BUNDLE)/Contents/PlugIns"
+	@cp -R "$(WIDGET_BUNDLE)" "$(APP_BUNDLE)/Contents/PlugIns/"
+	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/CalculatorWidget.entitlements "$(APP_BUNDLE)/Contents/PlugIns/CalculatorWidget.appex" \
+		|| codesign --force --sign - --entitlements Resources/CalculatorWidget.entitlements "$(APP_BUNDLE)/Contents/PlugIns/CalculatorWidget.appex"
+	@codesign --force --sign "$(SIGN_ID)" --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)" \
+		|| codesign --force --sign - --entitlements Resources/TypingStats.entitlements "$(APP_BUNDLE)"
+	@codesign --verify --deep --strict "$(APP_BUNDLE)"
 	@echo "Built: $(APP_BUNDLE) ($(PACKAGE_VERSION))"
 
 run: app

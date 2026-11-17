@@ -97,6 +97,8 @@ final class AppState: ObservableObject {
     private var clipboardTargetApplication: NSRunningApplication?
     private var timestampHotKeyMonitor: ClipboardHotKeyMonitor?
     private var timestampWindowController: TimestampToolWindowController?
+    let calculatorWindowController = CalculatorWindowController()
+    let timestampDesktopWindowController = TimestampWindowController()
     private var timestampTargetApplication: NSRunningApplication?
     private var lastPasteTargetApplication: NSRunningApplication?
     private var suppressToolWindowsUntil: Date?
@@ -159,6 +161,8 @@ final class AppState: ObservableObject {
         startHardwareMonitoring()
         startClipboardHistory()
         startTimestampTool()
+        calculatorWindowController.restore()
+        timestampDesktopWindowController.restore()
     }
 
     func start() {

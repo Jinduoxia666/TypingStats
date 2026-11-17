@@ -1,7 +1,7 @@
 name: TypingStats
 options:
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   createIntermediateGroups: true
   bundleIdPrefix: com.jinduoxia
 
@@ -38,8 +38,27 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: Resources/TypingStats.entitlements
     dependencies:
+      - target: CalculatorWidget
+        embed: true
       - package: GRDB
         product: GRDB
+
+  CalculatorWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/CalculatorWidget
+      - path: Sources/TypingStats/Calculator/CalculatorModel.swift
+      - path: Sources/TypingStats/Calculator/CalculatorExpression.swift
+      - path: Sources/TypingStats/Calculator/CalculatorTheme.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jinduoxia.TypingStats.CalculatorWidget
+        INFOPLIST_FILE: Resources/CalculatorWidget-Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: Resources/CalculatorWidget.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
 
   TypingStatsTests:
     type: bundle.unit-test
@@ -54,6 +73,10 @@ targets:
       - target: TypingStats
 
 schemes:
+  CalculatorWidget:
+    build:
+      targets:
+        CalculatorWidget: all
   TypingStats:
     build:
       targets:

@@ -52,7 +52,7 @@ struct TimestampToolPickerView: View {
     }
 }
 
-private struct TimestampToolRow: View {
+struct TimestampToolRow: View {
     let item: TimestampConversionItem
     let isSelected: Bool
     let onSelect: () -> Void

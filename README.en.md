@@ -23,6 +23,7 @@ Keystroke tracking **counts only and never records content**. Data stays on your
 |---|---|---|
 | Clipboard history | `⌃⌥⌘V` / main window "剪贴板" | Keeps the last 50 text and image items. In the picker, `↑↓` selects, `Return` pastes, `1`–`8` pastes directly. |
 | Timestamp converter | `⌃⌥⌘T` | Converts between Unix timestamps (seconds / milliseconds) and dates. Prefills from the clipboard and pastes the result back into the previous app. |
+| Persistent timestamp window | Menu bar → 时间戳转换 | Live conversion, click or Return to copy without closing; supports dragging, always-on-top, and position restoration. |
 | Input source lock | Menu bar panel / Settings | Switches back to your chosen input source when something changes it, at most once every 2 seconds. |
 | launchd jobs | Main window "定时任务" | Lists your launchd jobs with schedules, next run time and logs. Enable, disable or run a job once. |
 | Network speed test | Main window "更多 → 网络测速" | Runs macOS's built-in `networkQuality` for throughput, latency and RPM. |
@@ -33,7 +34,7 @@ Both global shortcuts can be re-recorded in Settings → 通用. Main window pag
 
 ## Requirements
 
-- macOS 13 Ventura or later
+- macOS 14 Sonoma or later
 - Accessibility permission (for keystroke counting, global shortcuts and auto-paste)
 
 ## Installation
@@ -49,6 +50,12 @@ Both global shortcuts can be re-recorded in Settings → 通用. Main window pag
 > Release builds are ad-hoc signed and Apple Silicon only. macOS treats each update as a different app, so after upgrading, remove the old TypingStats entry from the Accessibility list and grant permission again.
 
 ## Building from source
+
+Full app builds require Xcode and XcodeGen (`brew install xcodegen`). `make app`, `make run`, and `make dmg` build and embed the WidgetKit extension; `swift build` builds only the host executable.
+
+The desktop calculator is available in macOS Edit Widgets after launching the bundled app. Search for TypingStats, then add the small or large calculator. Edit the widget to choose Cream, Mint, or Cocoa. Click its buttons to calculate; keyboard input is available only in the separate calculator window. Widget instances share one saved calculation, independent of the window.
+
+Expressions retain their complete history and use standard operator precedence (`9 + 9 × 2 = 27`). The window scrolls long expressions. Basic/scientific mode switching preserves the calculation and exposes parentheses, powers, roots, trigonometry, logarithms, reciprocals, π and e, with DEG/RAD angle selection. The large widget shows both keypads; the small widget switches between them.
 
 Requires Xcode 15 or later (Swift 5.9).
 

@@ -68,6 +68,25 @@ struct MenuBarContentView: View {
             fixedInputSourceControls
 
             Divider()
+            Button {
+                dismissMenu()
+                state.calculatorWindowController.show()
+            } label: {
+                Label("桌面计算器", systemImage: "plus.forwardslash.minus")
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                dismissMenu()
+                state.closeTimestampTool(returnToMenuBarOnly: false)
+                state.closeClipboardHistory(returnToMenuBarOnly: false)
+                state.timestampDesktopWindowController.show()
+            } label: {
+                Label("时间戳转换", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.plain)
+
+            Divider()
             actions
             Text(versionText)
                 .font(.system(size: 10))
