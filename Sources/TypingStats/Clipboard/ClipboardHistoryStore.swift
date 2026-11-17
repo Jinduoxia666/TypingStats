@@ -11,7 +11,7 @@ final class ClipboardHistoryStore: ObservableObject {
     @Published private(set) var items: [ClipboardHistoryItem] = []
 
     private let pasteboard: NSPasteboard
-    private let maxItems = 50
+    private let maxItems = 100
     private let maxTextBytes = 2 * 1_024 * 1_024
     private var timer: Timer?
     private var lastChangeCount: Int

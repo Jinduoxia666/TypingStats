@@ -21,7 +21,7 @@ Keystroke tracking **counts only and never records content**. Data stays on your
 ### Tools
 | Tool | Where | What it does |
 |---|---|---|
-| Clipboard history | `⌃⌥⌘V` / main window "剪贴板" | Keeps the last 50 text and image items. In the picker, `↑↓` selects, `Return` pastes, `1`–`8` pastes directly. |
+| Clipboard history | `⌃⌥⌘V` / main window "剪贴板" | Keeps the last 100 text and image items. In the picker, `↑↓` selects, `Return` pastes, `1`–`8` pastes directly. |
 | Timestamp converter | `⌃⌥⌘T` | Converts between Unix timestamps (seconds / milliseconds) and dates. Prefills from the clipboard and pastes the result back into the previous app. |
 | Persistent timestamp window | Menu bar → 时间戳转换 | Live conversion, click or Return to copy without closing; supports dragging, always-on-top, and position restoration. |
 | Input source lock | Menu bar panel / Settings | Switches back to your chosen input source when something changes it, at most once every 2 seconds. |
