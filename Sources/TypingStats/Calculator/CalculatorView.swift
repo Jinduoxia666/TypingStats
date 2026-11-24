@@ -16,9 +16,11 @@ struct CalculatorView: View {
             HStack(spacing: 10) {
                 Button(action: close) { Image(systemName: "xmark") }
                     .help("关闭计算器").accessibilityLabel("关闭计算器")
-                Spacer()
-                Text("DESK CALC").font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(2)
-                Spacer()
+                Text("DESK CALC")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(2)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 18)
+                    .overlay { WindowDragRegion().accessibilityHidden(true) }
                 Menu {
                     Picker("配色", selection: $themeChoice) {
                         ForEach(CalculatorTheme.allCases) { Text($0.name).tag($0.rawValue) }
@@ -115,6 +117,7 @@ struct CalculatorView: View {
         }
         .padding(18)
         .frame(width: model.scientific ? 466 : 292, height: 420)
+        .background { WindowDragRegion().accessibilityHidden(true) }
         .background(theme.shell.gradient, in: RoundedRectangle(cornerRadius: 30))
         .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.45), lineWidth: 2))
         .onChange(of: model.scientific) { value in

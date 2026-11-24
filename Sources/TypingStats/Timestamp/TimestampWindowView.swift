@@ -14,7 +14,9 @@ struct TimestampWindowView: View {
             HStack {
                 Label("时间戳转换", systemImage: "clock.arrow.circlepath")
                     .font(.headline)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 24)
+                    .overlay { WindowDragRegion().accessibilityHidden(true) }
                 Button {
                     pinned.toggle()
                     setPinned(pinned)
@@ -75,6 +77,7 @@ struct TimestampWindowView: View {
         }
         .padding(16)
         .frame(width: 500, height: 374)
+        .background { WindowDragRegion().accessibilityHidden(true) }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.secondary.opacity(0.25)))
         .onAppear { inputFocused = true }
