@@ -78,9 +78,7 @@ struct MenuBarContentView: View {
 
             Button {
                 dismissMenu()
-                state.closeTimestampTool(returnToMenuBarOnly: false)
-                state.closeClipboardHistory(returnToMenuBarOnly: false)
-                state.timestampDesktopWindowController.show()
+                state.showTimestampFromMenuBar()
             } label: {
                 Label("时间戳转换", systemImage: "clock.arrow.circlepath")
             }

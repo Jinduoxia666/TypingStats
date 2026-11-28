@@ -28,6 +28,7 @@ final class ClipboardHistoryStore: ObservableObject {
     private var isProcessingImage = false
     private var pendingImage: ImagePayload?
     private var imageProcessingGeneration = 0
+    private var suppressPollingCount = 0
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -52,6 +53,15 @@ final class ClipboardHistoryStore: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    func beginSuppressingCapture() {
+        suppressPollingCount += 1
+    }
+
+    func endSuppressingCapture() {
+        suppressPollingCount = max(0, suppressPollingCount - 1)
+        lastChangeCount = pasteboard.changeCount
     }
 
     func clear() {
@@ -85,6 +95,7 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     private func pollPasteboard() {
+        guard suppressPollingCount == 0 else { return }
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 

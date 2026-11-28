@@ -1,13 +1,12 @@
-import AppKit
 import SwiftUI
 
 struct TimestampWindowView: View {
     @ObservedObject var model: TimestampViewModel
     @AppStorage("timestampWindowPinned") private var pinned = false
     @FocusState private var inputFocused: Bool
-    @State private var copiedValue: String?
     let close: () -> Void
     let setPinned: (Bool) -> Void
+    let onSelectItem: (TimestampConversionItem) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -20,9 +19,12 @@ struct TimestampWindowView: View {
                 Button {
                     pinned.toggle()
                     setPinned(pinned)
-                } label: { Image(systemName: pinned ? "pin.fill" : "pin") }
-                .help(pinned ? "取消置顶" : "始终置顶")
-                .accessibilityLabel(pinned ? "取消置顶" : "始终置顶")
+                } label: {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .foregroundStyle(pinned ? Color.accentColor : Color.secondary)
+                }
+                .help(pinned ? "取消固定" : "固定窗口")
+                .accessibilityLabel(pinned ? "取消固定" : "固定窗口")
                 Button(action: close) { Image(systemName: "xmark") }
                     .help("关闭时间戳转换").accessibilityLabel("关闭时间戳转换")
             }
@@ -35,9 +37,6 @@ struct TimestampWindowView: View {
                     .accessibilityLabel("时间戳或日期时间")
                     .textFieldStyle(.plain)
                     .focused($inputFocused)
-                    .onSubmit {
-                        if model.items.indices.contains(model.selectionIndex) { copy(model.items[model.selectionIndex]) }
-                    }
                 if !model.input.isEmpty {
                     Button {
                         model.input = ""
@@ -54,20 +53,27 @@ struct TimestampWindowView: View {
                 ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                     TimestampToolRow(item: item, isSelected: model.selectionIndex == index) {
                         model.select(at: index)
-                        copy(item)
+                        onSelectItem(item)
                     }
-                    .help("点击复制：\(item.value)")
+                    .onHover { hovering in
+                        if hovering {
+                            model.select(at: index)
+                        }
+                    }
+                    .help(pinned || !model.canPasteBack ? "点击复制：\(item.value)" : "点击粘贴：\(item.value)")
                 }
                 Spacer(minLength: 0)
             }
 
             HStack {
-                if let copiedValue {
+                if let copiedValue = model.copiedValue {
                     Label("已复制 \(copiedValue)", systemImage: "checkmark")
                 } else if !model.input.isEmpty && !TimestampConversionItem.isConvertibleInput(model.input) {
                     Text("未识别输入，请输入时间戳或 yyyy-MM-dd HH:mm:ss")
+                } else if !pinned && model.canPasteBack {
+                    Text("回车或点击粘贴 · Esc 关闭 · \(TimeZone.current.identifier)")
                 } else {
-                    Text("点击结果或回车复制 · \(TimeZone.current.identifier)")
+                    Text("点击结果或回车复制 · Esc 关闭 · \(TimeZone.current.identifier)")
                 }
                 Spacer(minLength: 0)
             }
@@ -81,15 +87,61 @@ struct TimestampWindowView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.secondary.opacity(0.25)))
         .onAppear { inputFocused = true }
-        .onChange(of: model.input) { _ in
+        .onChange(of: model.focusToken) {
+            inputFocused = true
+        }
+        .onChange(of: model.input) {
             model.select(at: 0)
-            copiedValue = nil
+            model.copiedValue = nil
+        }
+    }
+}
+
+struct TimestampToolRow: View {
+    let item: TimestampConversionItem
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(width: 24)
+                    .foregroundStyle(isSelected ? .white : .secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(item.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(isSelected ? .white.opacity(0.78) : .secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text(item.value)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.14))
+                .frame(height: 1)
         }
     }
 
-    private func copy(_ item: TimestampConversionItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
-        copiedValue = item.value
+    private var iconName: String {
+        item.id.contains("string") ? "calendar" : "number"
     }
 }

@@ -6,20 +6,18 @@ final class TimestampViewModel: ObservableObject {
     @Published var input = ""
     @Published private(set) var selectionIndex = 0
     @Published private(set) var now = Date()
+    @Published var copiedValue: String?
+    @Published var canPasteBack = false
+    @Published private(set) var focusToken = 0
 
     var items: [TimestampConversionItem] {
         TimestampConversionItem.items(input: input, now: now)
     }
 
     private var timer: Timer?
-    private var onPaste: (TimestampConversionItem) -> Void = { _ in }
 
     deinit {
         timer?.invalidate()
-    }
-
-    func configure(onPaste: @escaping (TimestampConversionItem) -> Void) {
-        self.onPaste = onPaste
     }
 
     func start() {
@@ -47,7 +45,7 @@ final class TimestampViewModel: ObservableObject {
         select(at: selectionIndex + delta)
     }
 
-    func paste(_ item: TimestampConversionItem) {
-        onPaste(item)
+    func requestFocus() {
+        focusToken += 1
     }
 }

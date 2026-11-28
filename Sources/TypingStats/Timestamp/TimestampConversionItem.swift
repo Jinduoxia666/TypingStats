@@ -76,6 +76,18 @@ struct TimestampConversionItem: Identifiable, Equatable {
         return parseTimestamp(trimmed) != nil || parseDate(trimmed) != nil
     }
 
+    static func extractConvertibleInput(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if isConvertibleInput(trimmed) {
+            return trimmed
+        }
+        let wrapperCharacters = CharacterSet(charactersIn: "\"'`,;").union(.whitespacesAndNewlines)
+        let unwrapped = trimmed.trimmingCharacters(in: wrapperCharacters)
+        guard !unwrapped.isEmpty, isConvertibleInput(unwrapped) else { return nil }
+        return unwrapped
+    }
+
     private static func parseTimestamp(_ value: String) -> Date? {
         guard let number = Double(value) else { return nil }
         let seconds = abs(number) >= 10_000_000_000 ? number / 1000 : number

@@ -88,6 +88,7 @@ final class KeystrokeMonitor {
     }
 
     fileprivate func handleKeyDown(_ event: CGEvent) {
+        if event.getIntegerValueField(.eventSourceUserData) == SelectedTextReader.syntheticEventUserData { return }
         // Ignore auto-repeat so holding a key counts as a single press.
         if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return }
         // Only the 26 letters and digits 0–9 count toward the character estimate;

@@ -56,7 +56,6 @@ final class AppState: ObservableObject {
 
     /// Today's total across all of the user's devices.
     var todayKeystrokesMerged: Int { todayKeystrokes + otherDevicesTodayKeystrokes }
-    var timestampItems: [TimestampConversionItem] { timestampViewModel.items }
 
     private enum Keys {
         static let excluded = "excludedBundleIds"
@@ -72,7 +71,6 @@ final class AppState: ObservableObject {
     let dashboardStats = DashboardStatsModel()
     let hardwareStats = HardwareStatsModel()
     let clipboardViewModel = ClipboardViewModel()
-    let timestampViewModel = TimestampViewModel()
 
     private let monitor: KeystrokeMonitor
     private let database: DatabaseManager
@@ -96,13 +94,12 @@ final class AppState: ObservableObject {
     private var clipboardWindowController: ClipboardHistoryWindowController?
     private var clipboardTargetApplication: NSRunningApplication?
     private var timestampHotKeyMonitor: ClipboardHotKeyMonitor?
-    private var timestampWindowController: TimestampToolWindowController?
     let calculatorWindowController = CalculatorWindowController()
-    let timestampDesktopWindowController = TimestampWindowController()
-    private var timestampTargetApplication: NSRunningApplication?
+    let timestampWindowController = TimestampWindowController()
     private var lastPasteTargetApplication: NSRunningApplication?
     private var suppressToolWindowsUntil: Date?
     private var isRecordingShortcut = false
+    private var isCapturingSelectedText = false
     private let syncQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.sync", qos: .utility)
     private let hardwareQueue = DispatchQueue(label: "com.jinduoxia.TypingStats.hardware", qos: .utility)
     private var isRunning = false
@@ -134,10 +131,10 @@ final class AppState: ObservableObject {
             onPaste: { [weak self] item in self?.pasteClipboardItem(item) },
             onSelect: { [weak self] index in self?.selectClipboardItem(at: index) }
         )
-        timestampViewModel.configure { [weak self] item in
-            self?.pasteTimestampItem(item)
-        }
         clipboardViewModel.update(shortcut: clipboardShortcut)
+        timestampWindowController.onPasteBack = { [weak self] target in
+            self?.pasteIntoTarget(target)
+        }
 
         monitor.onKeystroke = { [weak self] app in
             // The CGEventTap callback runs on the main run loop, so we're already
@@ -162,7 +159,7 @@ final class AppState: ObservableObject {
         startClipboardHistory()
         startTimestampTool()
         calculatorWindowController.restore()
-        timestampDesktopWindowController.restore()
+        timestampWindowController.restore()
     }
 
     func start() {
@@ -186,7 +183,7 @@ final class AppState: ObservableObject {
 
     func showClipboardHistory() {
         guard canOpenToolWindow else { return }
-        closeTimestampTool()
+        timestampWindowController.closeIfUnpinned()
         clipboardTargetApplication = currentPasteTargetApplication()
         selectClipboardItem(at: 0)
         if clipboardWindowController == nil {
@@ -201,36 +198,46 @@ final class AppState: ObservableObject {
     }
 
     func showTimestampTool() {
-        guard canOpenToolWindow else { return }
-        closeClipboardHistory()
-        timestampTargetApplication = currentPasteTargetApplication()
-        fillTimestampInputFromPasteboardIfPossible()
-        startTimestampTimer()
-        selectTimestampItem(at: 0)
-        if timestampWindowController == nil {
-            timestampWindowController = TimestampToolWindowController(state: self)
+        guard canOpenToolWindow, !isCapturingSelectedText else { return }
+        closeClipboardHistory(returnToMenuBarOnly: false)
+        let targetApp = currentPasteTargetApplication()
+        isCapturingSelectedText = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isCapturingSelectedText = false }
+            let selected = await SelectedTextReader.readSelectedText(
+                from: targetApp,
+                clipboardHistory: self.clipboardHistory
+            )
+            guard self.canOpenToolWindow else { return }
+            let autoInput = Self.convertibleInput(selectedText: selected)
+            self.timestampWindowController.showFromHotKey(input: autoInput, pasteTarget: targetApp)
         }
-        timestampWindowController?.show()
     }
 
-    private func fillTimestampInputFromPasteboardIfPossible() {
-        guard let value = NSPasteboard.general.string(forType: .string),
-              TimestampConversionItem.isConvertibleInput(value) else {
-            return
-        }
-        timestampViewModel.input = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    func showTimestampFromMenuBar() {
+        closeClipboardHistory(returnToMenuBarOnly: false)
+        let targetApp = currentPasteTargetApplication()
+        let selected = SelectedTextReader.readSelectedTextSynchronously(from: targetApp)
+        let autoInput = Self.convertibleInput(selectedText: selected)
+        timestampWindowController.showFromMenuBar(input: autoInput)
     }
 
-    func closeTimestampTool(returnToMenuBarOnly: Bool = true) {
-        timestampWindowController?.close(returnToMenuBarOnly: returnToMenuBarOnly)
-        timestampTargetApplication = nil
-        stopTimestampTimer()
+    private static func convertibleInput(selectedText: String?) -> String? {
+        if let selectedText, let extracted = TimestampConversionItem.extractConvertibleInput(selectedText) {
+            return extracted
+        }
+        if let pasteboardText = NSPasteboard.general.string(forType: .string),
+           let extracted = TimestampConversionItem.extractConvertibleInput(pasteboardText) {
+            return extracted
+        }
+        return nil
     }
 
     func prepareToOpenMainWindow() {
         suppressToolWindowsUntil = Date().addingTimeInterval(0.6)
         closeClipboardHistory(returnToMenuBarOnly: false)
-        closeTimestampTool(returnToMenuBarOnly: false)
+        timestampWindowController.closeIfUnpinned()
     }
 
     func setShortcutRecording(_ recording: Bool) {
@@ -238,7 +245,7 @@ final class AppState: ObservableObject {
         if recording {
             suppressToolWindowsUntil = .distantFuture
             closeClipboardHistory(returnToMenuBarOnly: false)
-            closeTimestampTool(returnToMenuBarOnly: false)
+            timestampWindowController.closeIfUnpinned()
         } else {
             suppressToolWindowsUntil = Date().addingTimeInterval(0.25)
         }
@@ -253,38 +260,6 @@ final class AppState: ObservableObject {
         if Date() < suppressToolWindowsUntil { return true }
         self.suppressToolWindowsUntil = nil
         return false
-    }
-
-    func selectTimestampItem(at index: Int) {
-        timestampViewModel.select(at: index)
-    }
-
-    func moveTimestampSelection(by delta: Int) {
-        timestampViewModel.moveSelection(by: delta)
-    }
-
-    func pasteSelectedTimestampItem() {
-        let items = timestampItems
-        let index = timestampViewModel.selectionIndex
-        guard items.indices.contains(index) else { return }
-        pasteTimestampItem(items[index])
-    }
-
-    func pasteTimestampItem(_ item: TimestampConversionItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
-        let target = timestampTargetApplication
-        closeTimestampTool()
-
-        pasteIntoTarget(target)
-    }
-
-    private func startTimestampTimer() {
-        timestampViewModel.start()
-    }
-
-    private func stopTimestampTimer() {
-        timestampViewModel.stop()
     }
 
     func pasteClipboardItem(_ item: ClipboardHistoryItem) {
@@ -542,6 +517,8 @@ final class AppState: ObservableObject {
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
         keyDown?.flags = .maskCommand
         keyUp?.flags = .maskCommand
+        keyDown?.setIntegerValueField(.eventSourceUserData, value: SelectedTextReader.syntheticEventUserData)
+        keyUp?.setIntegerValueField(.eventSourceUserData, value: SelectedTextReader.syntheticEventUserData)
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
     }
